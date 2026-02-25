@@ -19,7 +19,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
+const usageComply = "Usage: qip comply <impl.wasm> [--with <compliance.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
 
 const (
 	implModuleName                = "impl"
@@ -30,9 +30,9 @@ const (
 	complyExportInputBytesCap     = "input_bytes_cap"
 	complyExportTileRGBA64        = "tile_rgba_f32_64x64"
 	complyExportComply            = "comply"
-	defaultCheckTimeout           = 5 * time.Second
+	defaultComplianceTimeout      = 5 * time.Second
 	maxFailurePreviewBytes        = 256
-	minCheckTimeoutMS         int = 1
+	minComplianceTimeoutMS    int = 1
 )
 
 type stringListFlag []string
@@ -61,13 +61,13 @@ type baseValidationResult struct {
 	kind moduleKind
 }
 
-type checkSpec struct {
+type complianceSpec struct {
 	index int
 	path  string
 	wasm  []byte
 }
 
-type checkOutcome struct {
+type complianceOutcomes struct {
 	index    int
 	path     string
 	passed   bool
@@ -79,13 +79,13 @@ type checkOutcome struct {
 func RunComplyCommand(args []string) error {
 	fs := flag.NewFlagSet("comply", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var withChecks stringListFlag
+	var withCompliances stringListFlag
 	var verbose bool
 	var timeoutMS int
-	fs.Var(&withChecks, "with", "compliance check module (repeatable)")
+	fs.Var(&withCompliances, "with", "compliance module (repeatable)")
 	fs.BoolVar(&verbose, "v", false, "enable verbose logging")
 	fs.BoolVar(&verbose, "verbose", false, "enable verbose logging")
-	fs.IntVar(&timeoutMS, "timeout-ms", int(defaultCheckTimeout/time.Millisecond), "per-check execution timeout in milliseconds")
+	fs.IntVar(&timeoutMS, "timeout-ms", int(defaultComplianceTimeout/time.Millisecond), "per-compliance execution timeout in milliseconds")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%s %w", usageComply, err)
 	}
@@ -94,10 +94,10 @@ func RunComplyCommand(args []string) error {
 	if len(rest) != 1 {
 		return errors.New(usageComply)
 	}
-	if timeoutMS < minCheckTimeoutMS {
+	if timeoutMS < minComplianceTimeoutMS {
 		return fmt.Errorf("%s invalid timeout-ms: %d", usageComply, timeoutMS)
 	}
-	checkTimeout := time.Duration(timeoutMS) * time.Millisecond
+	complianceTimeout := time.Duration(timeoutMS) * time.Millisecond
 
 	implPath := rest[0]
 	implWasm, err := readComplyModulePath(implPath)
@@ -116,37 +116,34 @@ func RunComplyCommand(args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "comply: base contract valid (%s module)\n", base.kind)
 
-	if len(withChecks) == 0 {
+	if len(withCompliances) == 0 {
 		return nil
 	}
 
-	checks := make([]checkSpec, 0, len(withChecks))
-	for i, path := range withChecks {
+	compliances := make([]complianceSpec, 0, len(withCompliances))
+	for i, path := range withCompliances {
 		body, err := readComplyModulePath(path)
 		if err != nil {
 			return fmt.Errorf("failed to read --with %q: %w", path, err)
 		}
 		if verbose {
 			sum := sha256.Sum256(body)
-			fmt.Fprintf(os.Stderr, "check[%d] %s sha256: %x\n", i+1, path, sum)
+			fmt.Fprintf(os.Stderr, "compliance[%d] %s sha256: %x\n", i+1, path, sum)
 		}
-		checks = append(checks, checkSpec{index: i, path: path, wasm: body})
+		compliances = append(compliances, complianceSpec{index: i, path: path, wasm: body})
 	}
 
-	outcomes := make(chan checkOutcome, len(checks))
+	outcomes := make(chan complianceOutcomes, len(compliances))
 	var wg sync.WaitGroup
-	for _, check := range checks {
-		check := check
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			outcomes <- runCheckModule(implWasm, check, checkTimeout)
-		}()
+	for _, compliance := range compliances {
+		wg.Go(func() {
+			outcomes <- runComplianceModule(implWasm, compliance, complianceTimeout)
+		})
 	}
 	wg.Wait()
 	close(outcomes)
 
-	results := make([]checkOutcome, 0, len(checks))
+	results := make([]complianceOutcomes, 0, len(compliances))
 	for out := range outcomes {
 		results = append(results, out)
 	}
@@ -166,7 +163,7 @@ func RunComplyCommand(args []string) error {
 	}
 
 	if failCount > 0 {
-		return fmt.Errorf("compliance failed: %d/%d check modules failed", failCount, len(results))
+		return fmt.Errorf("compliance failed: %d/%d compliance modules failed", failCount, len(results))
 	}
 	return nil
 }
@@ -302,10 +299,10 @@ func getExportedI32(ctx context.Context, mod api.Module, name string) (int32, bo
 	return 0, false, nil
 }
 
-func runCheckModule(implWasm []byte, check checkSpec, timeout time.Duration) checkOutcome {
-	out := checkOutcome{
-		index: check.index,
-		path:  check.path,
+func runComplianceModule(implWasm []byte, compliance complianceSpec, timeout time.Duration) complianceOutcomes {
+	out := complianceOutcomes{
+		index: compliance.index,
+		path:  compliance.path,
 	}
 	start := time.Now()
 	defer func() { out.duration = time.Since(start) }()
@@ -321,19 +318,19 @@ func runCheckModule(implWasm []byte, check checkSpec, timeout time.Duration) che
 	}
 	defer implCompiled.Close(ctx)
 
-	checkCompiled, err := r.CompileModule(ctx, check.wasm)
+	complianceCompiled, err := r.CompileModule(ctx, compliance.wasm)
 	if err != nil {
-		out.err = errors.New("check module could not be compiled")
+		out.err = errors.New("compliance module could not be compiled")
 		return out
 	}
-	defer checkCompiled.Close(ctx)
+	defer complianceCompiled.Close(ctx)
 
-	if err := ensureCheckImportsImplMemory(checkCompiled); err != nil {
+	if err := ensurecomplianceImportsImplMemory(complianceCompiled); err != nil {
 		out.err = err
 		return out
 	}
 
-	if err := ensureCheckComplySignature(checkCompiled); err != nil {
+	if err := ensurecomplianceComplySignature(complianceCompiled); err != nil {
 		out.err = err
 		return out
 	}
@@ -345,32 +342,32 @@ func runCheckModule(implWasm []byte, check checkSpec, timeout time.Duration) che
 	}
 	defer implMod.Close(ctx)
 
-	checkMod, err := r.InstantiateModule(ctx, checkCompiled, wazero.NewModuleConfig().WithName("compliance-check"))
+	complianceMod, err := r.InstantiateModule(ctx, complianceCompiled, wazero.NewModuleConfig().WithName("compliance-compliance"))
 	if err != nil {
-		out.err = fmt.Errorf("check module could not be instantiated (imports must bind to %q): %w", implModuleName, err)
+		out.err = fmt.Errorf("compliance module could not be instantiated (imports must bind to %q): %w", implModuleName, err)
 		return out
 	}
-	defer checkMod.Close(ctx)
+	defer complianceMod.Close(ctx)
 
-	complyFn := checkMod.ExportedFunction(complyExportComply)
+	complyFn := complianceMod.ExportedFunction(complyExportComply)
 	if complyFn == nil {
-		out.err = errors.New(`check module must export comply() -> i32`)
+		out.err = errors.New(`compliance module must export comply() -> i32`)
 		return out
 	}
 
-	checkCtx := context.Background()
-	checkCtx, cancel := wasmruntime.WithExecutionTimeout(checkCtx, timeout)
+	complianceCtx := context.Background()
+	complianceCtx, cancel := wasmruntime.WithExecutionTimeout(complianceCtx, timeout)
 	defer cancel()
 
-	res, err := complyFn.Call(checkCtx)
+	res, err := complyFn.Call(complianceCtx)
 	if err != nil {
-		out.err = wasmruntime.HumanizeExecutionError(checkCtx, err)
-		out.detail = collectFailureDetail(checkCtx, implMod, checkMod)
+		out.err = wasmruntime.HumanizeExecutionError(complianceCtx, err)
+		out.detail = collectFailureDetail(complianceCtx, implMod, complianceMod)
 		return out
 	}
 	if len(res) != 1 {
 		out.err = fmt.Errorf("comply() returned %d values, want 1", len(res))
-		out.detail = collectFailureDetail(checkCtx, implMod, checkMod)
+		out.detail = collectFailureDetail(complianceCtx, implMod, complianceMod)
 		return out
 	}
 
@@ -381,11 +378,11 @@ func runCheckModule(implWasm []byte, check checkSpec, timeout time.Duration) che
 	}
 
 	out.err = fmt.Errorf("comply() reported failure status=%d", status)
-	out.detail = collectFailureDetail(checkCtx, implMod, checkMod)
+	out.detail = collectFailureDetail(complianceCtx, implMod, complianceMod)
 	return out
 }
 
-func ensureCheckImportsImplMemory(compiled wazero.CompiledModule) error {
+func ensurecomplianceImportsImplMemory(compiled wazero.CompiledModule) error {
 	memImports := compiled.ImportedMemories()
 	for _, mem := range memImports {
 		mod, name, ok := mem.Import()
@@ -393,38 +390,38 @@ func ensureCheckImportsImplMemory(compiled wazero.CompiledModule) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("check module must import %s.%s", implModuleName, complyExportMemory)
+	return fmt.Errorf("compliance module must import %s.%s", implModuleName, complyExportMemory)
 }
 
-func ensureCheckComplySignature(compiled wazero.CompiledModule) error {
+func ensurecomplianceComplySignature(compiled wazero.CompiledModule) error {
 	def, ok := compiled.ExportedFunctions()[complyExportComply]
 	if !ok {
-		return errors.New(`check module must export comply() -> i32`)
+		return errors.New(`compliance module must export comply() -> i32`)
 	}
 	if err := requireSignature(def, []api.ValueType{}, []api.ValueType{api.ValueTypeI32}, complyExportComply); err != nil {
-		return errors.New(`check module export comply must have signature () -> i32`)
+		return errors.New(`compliance module export comply must have signature () -> i32`)
 	}
 	return nil
 }
 
-func collectFailureDetail(ctx context.Context, implMod api.Module, checkMod api.Module) string {
+func collectFailureDetail(ctx context.Context, implMod api.Module, complianceMod api.Module) string {
 	mem := implMod.Memory()
 	if mem == nil {
-		mem = checkMod.Memory()
+		mem = complianceMod.Memory()
 	}
 	if mem == nil {
 		return ""
 	}
 
 	var parts []string
-	if msg := readFailureString(ctx, checkMod, mem, []string{"failure_message", "fail_message"}); msg != "" {
+	if msg := readFailureString(ctx, complianceMod, mem, []string{"failure_message", "fail_message"}); msg != "" {
 		parts = append(parts, "message: "+msg)
 	}
-	if in := readFailureBytes(ctx, checkMod, mem, []string{"failure_input", "fail_input"}); len(in) > 0 {
+	if in := readFailureBytes(ctx, complianceMod, mem, []string{"failure_input", "fail_input"}); len(in) > 0 {
 		parts = append(parts, "input_utf8_preview="+previewUTF8(in))
 		parts = append(parts, "input_hex_preview="+previewHex(in))
 	}
-	if out := readFailureBytes(ctx, checkMod, mem, []string{"failure_output", "fail_output"}); len(out) > 0 {
+	if out := readFailureBytes(ctx, complianceMod, mem, []string{"failure_output", "fail_output"}); len(out) > 0 {
 		parts = append(parts, "output_utf8_preview="+previewUTF8(out))
 		parts = append(parts, "output_hex_preview="+previewHex(out))
 	}
