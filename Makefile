@@ -1,6 +1,6 @@
-.PHONY: examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test
+.PHONY: compliance examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test
 
-default: qip examples recipes
+default: qip compliance examples recipes
 
 include ./examples/sqlite3/sqlite.mk
 
@@ -12,6 +12,11 @@ qip: main.go go.mod go.sum $(wildcard internal/*.go)
 	go fix ./...
 	go fmt ./...
 	go build -ldflags="-s -w" -trimpath
+
+compliance/%.wasm: compliance/%.wat
+	wat2wasm $< -o $@
+
+compliance: $(patsubst compliance/%.wat,compliance/%.wasm,$(wildcard compliance/*.wat))
 
 examples/%.wasm: examples/%.wat
 	wat2wasm $< -o $@

@@ -85,7 +85,7 @@
 
   ;; Returns >0 on pass, <=0 on failure.
   ;; Negative status codes identify the failing scenario.
-  (func (export "comply") (result i32)
+  (func (export "positive") (result i32)
     (local $in_ptr i32)
     (local $expected_ptr i32)
     (local $out_size i32)

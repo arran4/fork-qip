@@ -4,7 +4,7 @@
 
   ;; Returns >0 on pass, <=0 on failure.
   ;; Check: empty input must not trap, and output size should be stable.
-  (func (export "comply") (result i32)
+  (func (export "positive") (result i32)
     (local $first i32)
     (local $second i32)
 

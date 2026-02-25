@@ -23,13 +23,16 @@ const usageComply = "Usage: qip comply <impl.wasm> [--with <compliance.wasm> ...
 
 const (
 	implModuleName                = "impl"
+	trapHostModuleName            = "qip"
+	trapHostExportRunMustTrap     = "run_must_trap"
 	complyExportMemory            = "memory"
 	complyExportRun               = "run"
 	complyExportInputPtr          = "input_ptr"
 	complyExportInputUTF8Cap      = "input_utf8_cap"
 	complyExportInputBytesCap     = "input_bytes_cap"
 	complyExportTileRGBA64        = "tile_rgba_f32_64x64"
-	complyExportComply            = "comply"
+	complyExportPositive          = "positive"
+	complyExportNegative          = "negative"
 	defaultComplianceTimeout      = 5 * time.Second
 	maxFailurePreviewBytes        = 256
 	minComplianceTimeoutMS    int = 1
@@ -114,7 +117,7 @@ func RunComplyCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "comply: base contract valid (%s module)\n", base.kind)
+	fmt.Fprintf(os.Stderr, "comply: module fulfills %s contract\n", base.kind)
 
 	if len(withCompliances) == 0 {
 		return nil
@@ -330,55 +333,31 @@ func runComplianceModule(implWasm []byte, compliance complianceSpec, timeout tim
 		return out
 	}
 
-	if err := ensurecomplianceComplySignature(complianceCompiled); err != nil {
+	hasNegative, err := ensureComplianceEntrypointSignatures(complianceCompiled)
+	if err != nil {
 		out.err = err
 		return out
 	}
+	needsTrapHost := complianceNeedsTrapHost(complianceCompiled)
 
-	implMod, err := r.InstantiateModule(ctx, implCompiled, wazero.NewModuleConfig().WithName(implModuleName))
+	_, detail, err := runCompliancePhase(ctx, r, implCompiled, complianceCompiled, timeout, complyExportPositive, needsTrapHost)
 	if err != nil {
-		out.err = errors.New("implementation module could not be instantiated")
-		return out
-	}
-	defer implMod.Close(ctx)
-
-	complianceMod, err := r.InstantiateModule(ctx, complianceCompiled, wazero.NewModuleConfig().WithName("compliance-compliance"))
-	if err != nil {
-		out.err = fmt.Errorf("compliance module could not be instantiated (imports must bind to %q): %w", implModuleName, err)
-		return out
-	}
-	defer complianceMod.Close(ctx)
-
-	complyFn := complianceMod.ExportedFunction(complyExportComply)
-	if complyFn == nil {
-		out.err = errors.New(`compliance module must export comply() -> i32`)
+		out.err = err
+		out.detail = detail
 		return out
 	}
 
-	complianceCtx := context.Background()
-	complianceCtx, cancel := wasmruntime.WithExecutionTimeout(complianceCtx, timeout)
-	defer cancel()
-
-	res, err := complyFn.Call(complianceCtx)
-	if err != nil {
-		out.err = wasmruntime.HumanizeExecutionError(complianceCtx, err)
-		out.detail = collectFailureDetail(complianceCtx, implMod, complianceMod)
-		return out
-	}
-	if len(res) != 1 {
-		out.err = fmt.Errorf("comply() returned %d values, want 1", len(res))
-		out.detail = collectFailureDetail(complianceCtx, implMod, complianceMod)
-		return out
+	if hasNegative {
+		negativeTimeout := timeoutForNegativePhase(timeout)
+		_, detail, err = runCompliancePhase(ctx, r, implCompiled, complianceCompiled, negativeTimeout, complyExportNegative, true)
+		if err != nil {
+			out.err = err
+			out.detail = detail
+			return out
+		}
 	}
 
-	status := api.DecodeI32(res[0])
-	if status > 0 {
-		out.passed = true
-		return out
-	}
-
-	out.err = fmt.Errorf("comply() reported failure status=%d", status)
-	out.detail = collectFailureDetail(complianceCtx, implMod, complianceMod)
+	out.passed = true
 	return out
 }
 
@@ -393,15 +372,130 @@ func ensurecomplianceImportsImplMemory(compiled wazero.CompiledModule) error {
 	return fmt.Errorf("compliance module must import %s.%s", implModuleName, complyExportMemory)
 }
 
-func ensurecomplianceComplySignature(compiled wazero.CompiledModule) error {
-	def, ok := compiled.ExportedFunctions()[complyExportComply]
+func ensureComplianceEntrypointSignatures(compiled wazero.CompiledModule) (bool, error) {
+	def, ok := compiled.ExportedFunctions()[complyExportPositive]
 	if !ok {
-		return errors.New(`compliance module must export comply() -> i32`)
+		return false, errors.New(`compliance module must export positive() -> i32`)
 	}
-	if err := requireSignature(def, []api.ValueType{}, []api.ValueType{api.ValueTypeI32}, complyExportComply); err != nil {
-		return errors.New(`compliance module export comply must have signature () -> i32`)
+	if err := requireSignature(def, []api.ValueType{}, []api.ValueType{api.ValueTypeI32}, complyExportPositive); err != nil {
+		return false, errors.New(`compliance module export positive must have signature () -> i32`)
 	}
-	return nil
+	def, ok = compiled.ExportedFunctions()[complyExportNegative]
+	if !ok {
+		return false, nil
+	}
+	if err := requireSignature(def, []api.ValueType{}, []api.ValueType{api.ValueTypeI32}, complyExportNegative); err != nil {
+		return false, errors.New(`compliance module export negative must have signature () -> i32`)
+	}
+	return true, nil
+}
+
+func complianceNeedsTrapHost(compiled wazero.CompiledModule) bool {
+	for _, fn := range compiled.ImportedFunctions() {
+		mod, name, ok := fn.Import()
+		if ok && mod == trapHostModuleName && name == trapHostExportRunMustTrap {
+			return true
+		}
+	}
+	return false
+}
+
+func timeoutForNegativePhase(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return timeout
+	}
+	grace := min(max(timeout/2, 10*time.Millisecond), 100*time.Millisecond)
+	return timeout + grace
+}
+
+func runCompliancePhase(
+	ctx context.Context,
+	r wazero.Runtime,
+	implCompiled wazero.CompiledModule,
+	complianceCompiled wazero.CompiledModule,
+	timeout time.Duration,
+	entrypoint string,
+	installTrapHost bool,
+) (int32, string, error) {
+	implMod, err := r.InstantiateModule(ctx, implCompiled, wazero.NewModuleConfig().WithName(implModuleName))
+	if err != nil {
+		return 0, "", errors.New("implementation module could not be instantiated")
+	}
+	defer implMod.Close(ctx)
+
+	var trapHostMod api.Module
+	if installTrapHost {
+		trapHostMod, err = instantiateTrapHost(ctx, r, implMod, timeout)
+		if err != nil {
+			return 0, "", err
+		}
+		defer trapHostMod.Close(ctx)
+	}
+
+	complianceMod, err := r.InstantiateModule(ctx, complianceCompiled, wazero.NewModuleConfig().WithName("compliance-"+entrypoint))
+	if err != nil {
+		if installTrapHost {
+			return 0, "", fmt.Errorf("compliance module could not be instantiated (imports must bind to %q and %q): %w", implModuleName, trapHostModuleName, err)
+		}
+		return 0, "", fmt.Errorf("compliance module could not be instantiated (imports must bind to %q): %w", implModuleName, err)
+	}
+	defer complianceMod.Close(ctx)
+
+	fn := complianceMod.ExportedFunction(entrypoint)
+	if fn == nil {
+		return 0, "", fmt.Errorf(`compliance module must export %s() -> i32`, entrypoint)
+	}
+
+	complianceCtx := context.Background()
+	complianceCtx, cancel := wasmruntime.WithExecutionTimeout(complianceCtx, timeout)
+	defer cancel()
+
+	res, err := fn.Call(complianceCtx)
+	if err != nil {
+		return 0, collectFailureDetail(complianceCtx, implMod, complianceMod), wasmruntime.HumanizeExecutionError(complianceCtx, err)
+	}
+	if len(res) != 1 {
+		return 0, collectFailureDetail(complianceCtx, implMod, complianceMod), fmt.Errorf("%s() returned %d values, want 1", entrypoint, len(res))
+	}
+
+	status := api.DecodeI32(res[0])
+	if status > 0 {
+		return status, "", nil
+	}
+	if entrypoint == complyExportNegative {
+		return status, collectFailureDetail(complianceCtx, implMod, complianceMod), errors.New("negative() expected trap")
+	}
+	return status, collectFailureDetail(complianceCtx, implMod, complianceMod), fmt.Errorf("positive() expected output (returned %d)", status)
+}
+
+func instantiateTrapHost(ctx context.Context, r wazero.Runtime, implMod api.Module, phaseTimeout time.Duration) (api.Module, error) {
+	runFn := implMod.ExportedFunction(complyExportRun)
+	if runFn == nil {
+		return nil, errors.New(`qip.run_must_trap requires implementation module export run(i32) -> i32`)
+	}
+	probeTimeout := phaseTimeout
+	if probeTimeout > 0 {
+		probeTimeout /= 2
+	}
+	if probeTimeout <= 0 {
+		probeTimeout = 25 * time.Millisecond
+	}
+	if probeTimeout > 100*time.Millisecond {
+		probeTimeout = 100 * time.Millisecond
+	}
+	return r.NewHostModuleBuilder(trapHostModuleName).
+		NewFunctionBuilder().
+		WithFunc(func(callCtx context.Context, inputSize int32) int32 {
+			probeCtx, cancel := wasmruntime.WithExecutionTimeout(context.Background(), probeTimeout)
+			defer cancel()
+			_, err := runFn.Call(probeCtx, uint64(uint32(inputSize)))
+			if err != nil {
+				return 1
+			}
+			return 0
+		}).
+		Export(trapHostExportRunMustTrap).
+		Instantiate(ctx)
 }
 
 func collectFailureDetail(ctx context.Context, implMod api.Module, complianceMod api.Module) string {
