@@ -511,29 +511,63 @@ func collectFailureDetail(ctx context.Context, implMod api.Module, complianceMod
 	if msg := readFailureString(ctx, complianceMod, mem, []string{"failure_message", "fail_message"}); msg != "" {
 		parts = append(parts, "message: "+msg)
 	}
-	if in := readFailureBytes(ctx, complianceMod, mem, []string{"failure_input", "fail_input"}); len(in) > 0 {
+	if in, ok := readFailureBytesMaybe(ctx, complianceMod, mem, []string{"failure_input", "fail_input"}); ok {
 		parts = append(parts, "input_utf8_preview="+previewUTF8(in))
 		parts = append(parts, "input_hex_preview="+previewHex(in))
 	}
-	if out := readFailureBytes(ctx, complianceMod, mem, []string{"failure_output", "fail_output"}); len(out) > 0 {
-		parts = append(parts, "output_utf8_preview="+previewUTF8(out))
-		parts = append(parts, "output_hex_preview="+previewHex(out))
+
+	expectedOutput, hasExpectedOutput := readFailureBytesMaybe(
+		ctx,
+		complianceMod,
+		mem,
+		[]string{"failure_expected_output", "fail_expected_output"},
+	)
+	if hasExpectedOutput {
+		parts = append(parts, "expected_output_utf8_preview="+previewUTF8(expectedOutput))
+		parts = append(parts, "expected_output_hex_preview="+previewHex(expectedOutput))
+	}
+
+	actualOutput, hasActualOutput := readFailureBytesMaybe(
+		ctx,
+		complianceMod,
+		mem,
+		[]string{"failure_actual_output", "fail_actual_output"},
+	)
+	if !hasActualOutput {
+		actualOutput, hasActualOutput = readFailureBytesMaybe(
+			ctx,
+			complianceMod,
+			mem,
+			[]string{"failure_output", "fail_output"},
+		)
+	}
+	if hasActualOutput {
+		parts = append(parts, "actual_output_utf8_preview="+previewUTF8(actualOutput))
+		parts = append(parts, "actual_output_hex_preview="+previewHex(actualOutput))
 	}
 	if len(parts) == 0 {
-		return "no failure detail exports found; optional exports: failure_message_ptr/size, failure_input_ptr/size, failure_output_ptr/size"
+		return "no failure detail exports found; optional exports: failure_message_ptr/size, failure_input_ptr/size, failure_expected_output_ptr/size, failure_actual_output_ptr/size"
 	}
 	return strings.Join(parts, "\n")
 }
 
 func readFailureString(ctx context.Context, mod api.Module, mem api.Memory, bases []string) string {
-	data := readFailureBytes(ctx, mod, mem, bases)
-	if len(data) == 0 {
+	data, ok := readFailureBytesMaybe(ctx, mod, mem, bases)
+	if !ok || len(data) == 0 {
 		return ""
 	}
 	return string(data)
 }
 
 func readFailureBytes(ctx context.Context, mod api.Module, mem api.Memory, bases []string) []byte {
+	data, ok := readFailureBytesMaybe(ctx, mod, mem, bases)
+	if !ok || len(data) == 0 {
+		return nil
+	}
+	return data
+}
+
+func readFailureBytesMaybe(ctx context.Context, mod api.Module, mem api.Memory, bases []string) ([]byte, bool) {
 	for _, base := range bases {
 		ptrName := base + "_ptr"
 		sizeName := base + "_size"
@@ -545,17 +579,20 @@ func readFailureBytes(ctx context.Context, mod api.Module, mem api.Memory, bases
 		if err != nil || !ok {
 			continue
 		}
-		if ptr < 0 || size <= 0 {
+		if ptr < 0 || size < 0 {
 			continue
+		}
+		if size == 0 {
+			return []byte{}, true
 		}
 		raw, ok := mem.Read(uint32(ptr), uint32(size))
 		if !ok {
 			continue
 		}
 		clone := append([]byte(nil), raw...)
-		return clone
+		return clone, true
 	}
-	return nil
+	return nil, false
 }
 
 func previewUTF8(in []byte) string {

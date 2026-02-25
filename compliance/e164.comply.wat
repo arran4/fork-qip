@@ -25,8 +25,10 @@
 
   (global $failure_input_ptr (mut i32) (i32.const 0))
   (global $failure_input_size (mut i32) (i32.const 0))
-  (global $failure_output_ptr (mut i32) (i32.const 0))
-  (global $failure_output_size (mut i32) (i32.const 0))
+  (global $failure_expected_output_ptr (mut i32) (i32.const 0))
+  (global $failure_expected_output_size (mut i32) (i32.const 0))
+  (global $failure_actual_output_ptr (mut i32) (i32.const 0))
+  (global $failure_actual_output_size (mut i32) (i32.const 0))
 
   (func (export "failure_input_ptr") (result i32)
     (global.get $failure_input_ptr)
@@ -36,19 +38,34 @@
     (global.get $failure_input_size)
   )
 
-  (func (export "failure_output_ptr") (result i32)
-    (global.get $failure_output_ptr)
+  (func (export "failure_expected_output_ptr") (result i32)
+    (global.get $failure_expected_output_ptr)
   )
 
-  (func (export "failure_output_size") (result i32)
-    (global.get $failure_output_size)
+  (func (export "failure_expected_output_size") (result i32)
+    (global.get $failure_expected_output_size)
   )
 
-  (func $fail (param $in_ptr i32) (param $in_size i32) (param $out_size i32)
+  (func (export "failure_actual_output_ptr") (result i32)
+    (global.get $failure_actual_output_ptr)
+  )
+
+  (func (export "failure_actual_output_size") (result i32)
+    (global.get $failure_actual_output_size)
+  )
+
+  (func $fail
+    (param $in_ptr i32)
+    (param $in_size i32)
+    (param $expected_ptr i32)
+    (param $expected_size i32)
+    (param $actual_size i32)
     (global.set $failure_input_ptr (local.get $in_ptr))
     (global.set $failure_input_size (local.get $in_size))
-    (global.set $failure_output_ptr (call $output_ptr))
-    (global.set $failure_output_size (local.get $out_size))
+    (global.set $failure_expected_output_ptr (local.get $expected_ptr))
+    (global.set $failure_expected_output_size (local.get $expected_size))
+    (global.set $failure_actual_output_ptr (call $output_ptr))
+    (global.set $failure_actual_output_size (local.get $actual_size))
   )
 
   (func $output_equal (param $out_size i32) (param $expected_ptr i32) (param $expected_size i32) (result i32)
@@ -94,7 +111,7 @@
     ;; [in_ptr, in_ptr+31] for input and [in_ptr+32, ...] for expected output.
     (if (i32.lt_u (call $input_utf8_cap) (i32.const 64))
       (then
-        (call $fail (i32.const 0) (i32.const 0) (i32.const 0))
+        (call $fail (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0))
         (return (i32.const -100))
       )
     )
@@ -108,7 +125,7 @@
     (memory.init $case1_out (local.get $expected_ptr) (i32.const 0) (i32.const 12))
     (if (i32.eqz (call $output_equal (local.get $out_size) (local.get $expected_ptr) (i32.const 12)))
       (then
-        (call $fail (local.get $in_ptr) (i32.const 17) (local.get $out_size))
+        (call $fail (local.get $in_ptr) (i32.const 17) (local.get $expected_ptr) (i32.const 12) (local.get $out_size))
         (return (i32.const -1))
       )
     )
@@ -119,7 +136,7 @@
     (memory.init $case2_out (local.get $expected_ptr) (i32.const 0) (i32.const 12))
     (if (i32.eqz (call $output_equal (local.get $out_size) (local.get $expected_ptr) (i32.const 12)))
       (then
-        (call $fail (local.get $in_ptr) (i32.const 17) (local.get $out_size))
+        (call $fail (local.get $in_ptr) (i32.const 17) (local.get $expected_ptr) (i32.const 12) (local.get $out_size))
         (return (i32.const -2))
       )
     )
@@ -130,7 +147,7 @@
     (memory.init $case3_out (local.get $expected_ptr) (i32.const 0) (i32.const 8))
     (if (i32.eqz (call $output_equal (local.get $out_size) (local.get $expected_ptr) (i32.const 8)))
       (then
-        (call $fail (local.get $in_ptr) (i32.const 7) (local.get $out_size))
+        (call $fail (local.get $in_ptr) (i32.const 7) (local.get $expected_ptr) (i32.const 8) (local.get $out_size))
         (return (i32.const -3))
       )
     )
@@ -139,7 +156,7 @@
     (local.set $out_size (call $run (i32.const 0)))
     (if (i32.ne (local.get $out_size) (i32.const 0))
       (then
-        (call $fail (local.get $in_ptr) (i32.const 0) (local.get $out_size))
+        (call $fail (local.get $in_ptr) (i32.const 0) (local.get $expected_ptr) (i32.const 0) (local.get $out_size))
         (return (i32.const -4))
       )
     )
@@ -149,7 +166,7 @@
     (local.set $out_size (call $run (i32.const 3)))
     (if (i32.ne (local.get $out_size) (i32.const 0))
       (then
-        (call $fail (local.get $in_ptr) (i32.const 3) (local.get $out_size))
+        (call $fail (local.get $in_ptr) (i32.const 3) (local.get $expected_ptr) (i32.const 0) (local.get $out_size))
         (return (i32.const -5))
       )
     )
@@ -159,7 +176,7 @@
     (local.set $out_size (call $run (i32.const 1)))
     (if (i32.ne (local.get $out_size) (i32.const 0))
       (then
-        (call $fail (local.get $in_ptr) (i32.const 1) (local.get $out_size))
+        (call $fail (local.get $in_ptr) (i32.const 1) (local.get $expected_ptr) (i32.const 0) (local.get $out_size))
         (return (i32.const -6))
       )
     )
@@ -170,7 +187,7 @@
     (memory.init $case7_out (local.get $expected_ptr) (i32.const 0) (i32.const 15))
     (if (i32.eqz (call $output_equal (local.get $out_size) (local.get $expected_ptr) (i32.const 15)))
       (then
-        (call $fail (local.get $in_ptr) (i32.const 17) (local.get $out_size))
+        (call $fail (local.get $in_ptr) (i32.const 17) (local.get $expected_ptr) (i32.const 15) (local.get $out_size))
         (return (i32.const -7))
       )
     )
@@ -181,7 +198,7 @@
     (memory.init $case8_out (local.get $expected_ptr) (i32.const 0) (i32.const 4))
     (if (i32.eqz (call $output_equal (local.get $out_size) (local.get $expected_ptr) (i32.const 4)))
       (then
-        (call $fail (local.get $in_ptr) (i32.const 5) (local.get $out_size))
+        (call $fail (local.get $in_ptr) (i32.const 5) (local.get $expected_ptr) (i32.const 4) (local.get $out_size))
         (return (i32.const -8))
       )
     )
