@@ -1961,7 +1961,6 @@ func requestCmd(args []string) {
 		gameOver("%v", err)
 	}
 	var stateMu sync.RWMutex
-	var reloadMu sync.Mutex
 	defer func() {
 		stateMu.Lock()
 		current := state
@@ -1972,53 +1971,7 @@ func requestCmd(args []string) {
 		}
 	}()
 
-	reloadRecipesIfChanged := func() {
-		if opts.mode != modeDev || recipesRoot == "" {
-			return
-		}
-
-		reloadMu.Lock()
-		defer reloadMu.Unlock()
-
-		stamps, err := scanRecipeModuleStamps(recipesRoot)
-		if err != nil {
-			log.Printf("request: recipe change check failed: %v", err)
-			return
-		}
-
-		stateMu.RLock()
-		currentStamps := state.recipeStamps
-		unchanged := recipeModuleStampsEqual(currentStamps, stamps)
-		stateMu.RUnlock()
-		if unchanged {
-			return
-		}
-
-		reloadStart := time.Now()
-		nextState, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts)
-		if err != nil {
-			log.Printf("request: auto-reload failed reason=recipe_change error=%v", err)
-			return
-		}
-
-		stateMu.Lock()
-		previous := state
-		state = nextState
-		stateMu.Unlock()
-		if previous != nil {
-			closeModuleChains(context.Background(), previous.recipeChains)
-		}
-
-		log.Printf(
-			"request: reloaded reason=recipe_change paths=%d recipe_mimes=%d forms=%d duration_ms=%d",
-			len(nextState.contentRoutes),
-			len(nextState.recipeChains),
-			len(nextState.formModules),
-			time.Since(reloadStart).Milliseconds(),
-		)
-	}
-
-	handler := newDevRequestHandler("request", &stateMu, &state, reloadRecipesIfChanged)
+	handler := newDevRequestHandler("request", &stateMu, &state, nil)
 	response, err := qinternal.ServeInProcessHTTP(handler, method, requestPath, nil)
 	if err != nil {
 		gameOver("%v", err)
