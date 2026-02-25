@@ -89,7 +89,7 @@ func RunComplyCommand(args []string) error {
 	fs.BoolVar(&verbose, "v", false, "enable verbose logging")
 	fs.BoolVar(&verbose, "verbose", false, "enable verbose logging")
 	fs.IntVar(&timeoutMS, "timeout-ms", int(defaultComplianceTimeout/time.Millisecond), "per-compliance execution timeout in milliseconds")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeComplyArgs(args)); err != nil {
 		return fmt.Errorf("%s %w", usageComply, err)
 	}
 
@@ -169,6 +169,21 @@ func RunComplyCommand(args []string) error {
 		return fmt.Errorf("compliance failed: %d/%d compliance modules failed", failCount, len(results))
 	}
 	return nil
+}
+
+func normalizeComplyArgs(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	first := args[0]
+	if strings.HasPrefix(first, "-") {
+		return args
+	}
+
+	normalized := make([]string, 0, len(args))
+	normalized = append(normalized, args[1:]...)
+	normalized = append(normalized, first)
+	return normalized
 }
 
 func readComplyModulePath(path string) ([]byte, error) {
