@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	qinternal "github.com/royalicing/qip/internal"
 )
 
 func TestParseRecipeFilename(t *testing.T) {
@@ -57,55 +59,61 @@ func TestParseRecipeFilename(t *testing.T) {
 }
 
 func TestContentRequestPaths(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want []string
-	}{
-		{
-			name: "html index",
-			in:   "index.html",
-			want: []string{"/index.html", "/"},
-		},
-		{
-			name: "nested html index",
-			in:   "docs/index.html",
-			want: []string{"/docs/index.html", "/docs", "/docs/"},
-		},
-		{
-			name: "markdown page",
-			in:   "guide/start.md",
-			want: []string{"/guide/start.md", "/guide/start"},
-		},
-		{
-			name: "binary asset",
-			in:   "images/logo.png",
-			want: []string{"/images/logo.png"},
-		},
+	root := t.TempDir()
+	mustWrite := func(rel string) {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := contentRequestPaths(tc.in)
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("paths=%v, want %v", got, tc.want)
-			}
-		})
+	mustWrite("index.html")
+	mustWrite("docs/index.html")
+	mustWrite("guide/start.md")
+	mustWrite("images/logo.png")
+
+	routes, err := qinternal.BuildContentRoutes(root)
+	if err != nil {
+		t.Fatalf("BuildContentRoutes: %v", err)
+	}
+
+	checks := map[string]string{
+		"/index.html":      "index.html",
+		"/":                "index.html",
+		"/docs/index.html": "docs/index.html",
+		"/docs":            "docs/index.html",
+		"/docs/":           "docs/index.html",
+		"/guide/start.md":  "guide/start.md",
+		"/guide/start":     "guide/start.md",
+		"/images/logo.png": "images/logo.png",
+	}
+	for requestPath, wantRel := range checks {
+		route, ok := routes[requestPath]
+		if !ok {
+			t.Fatalf("missing route for %s", requestPath)
+		}
+		wantFull := filepath.Join(root, filepath.FromSlash(wantRel))
+		if route.FilePath != wantFull {
+			t.Fatalf("route %s file=%s, want %s", requestPath, route.FilePath, wantFull)
+		}
 	}
 }
 
 func TestResolveDevContentRoute(t *testing.T) {
-	routes := map[string]devContentRoute{
-		"/docs":  {filePath: "docs/index.md", sourceMIME: "text/markdown"},
-		"/docs/": {filePath: "docs/index.md", sourceMIME: "text/markdown"},
+	routes := map[string]qinternal.ContentRoute{
+		"/docs":  {FilePath: "docs/index.md", SourceMIME: "text/markdown"},
+		"/docs/": {FilePath: "docs/index.md", SourceMIME: "text/markdown"},
 	}
 
-	if _, ok := resolveDevContentRoute(routes, "/docs"); !ok {
+	if _, ok := qinternal.ResolveContentRoute(routes, "/docs"); !ok {
 		t.Fatal("expected /docs to resolve")
 	}
-	if _, ok := resolveDevContentRoute(routes, "/docs/"); !ok {
+	if _, ok := qinternal.ResolveContentRoute(routes, "/docs/"); !ok {
 		t.Fatal("expected /docs/ to resolve")
 	}
-	if _, ok := resolveDevContentRoute(routes, "/missing"); ok {
+	if _, ok := qinternal.ResolveContentRoute(routes, "/missing"); ok {
 		t.Fatal("expected /missing to be unresolved")
 	}
 }

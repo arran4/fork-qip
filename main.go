@@ -21,7 +21,6 @@ import (
 	"io/fs"
 	"log"
 	"math"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,7 +33,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -90,12 +88,13 @@ type options struct {
 	mode    runtimeMode
 }
 
-const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run     Run a chain of wasm modules on input\n  bench   Compare one or more wasm modules for output parity and performance\n  image   Run wasm filters on an input image\n  comply  Validate module ABI and run compliance check modules\n  dev     Start a dev server for a content directory with optional recipes\n  form    Run an interactive wasm form module in the terminal\n  help    Show command help"
+const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  request  Resolve one path through the dev router and print its result\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
 const usageRun = "Usage: qip run [-v] [-i <input>] <wasm module URL or file>..."
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value ...] ..."
 const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
 const usageDev = "Usage: qip dev <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-p <port>] [-v|--verbose]"
+const usageRequest = "Usage: qip request <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-X <GET|HEAD>] [-v|--verbose]"
 const usageForm = "Usage: qip form [-v|--verbose] <wasm module URL or file>"
 const usageHelp = "Usage: qip help [command]"
 
@@ -128,6 +127,8 @@ func main() {
 		complyCmd(args[1:])
 	} else if args[0] == "dev" {
 		devCmd(args[1:])
+	} else if args[0] == "request" {
+		requestCmd(args[1:])
 	} else if args[0] == "form" {
 		formCmd(args[1:])
 	} else {
@@ -153,6 +154,8 @@ func helpCmd(args []string) {
 		fmt.Println(helpComply)
 	case "dev":
 		fmt.Println(usageDev)
+	case "request":
+		fmt.Println(usageRequest)
 	case "form":
 		fmt.Println(usageForm)
 	default:
@@ -1674,11 +1677,6 @@ func vlogf(opts options, format string, args ...any) {
 	log.Printf(format, args...)
 }
 
-type devContentRoute struct {
-	filePath   string
-	sourceMIME string
-}
-
 type recipeCandidate struct {
 	path     string
 	filename string
@@ -1692,7 +1690,7 @@ type moduleFileStamp struct {
 }
 
 type devRuntimeState struct {
-	contentRoutes map[string]devContentRoute
+	contentRoutes map[string]qinternal.ContentRoute
 	recipeChains  map[string]*moduleChain
 	recipeDigests map[string][][32]byte
 	recipeStamps  map[string]moduleFileStamp
@@ -1844,108 +1842,11 @@ func devCmd(args []string) {
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	mux := http.NewServeMux()
-	var requestID uint64
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		reqID := atomic.AddUint64(&requestID, 1)
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			emptyDurations := []time.Duration{}
-			emptyInst := []time.Duration{}
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			log.Printf("dev: %s %s %s", r.Method, r.URL.Path, formatDurationParts(time.Since(start), emptyDurations, emptyInst))
-			return
-		}
-
-		reloadRecipesIfChanged()
-
-		stateMu.RLock()
-		route, ok := resolveDevContentRoute(state.contentRoutes, r.URL.Path)
-		if !ok {
-			stateMu.RUnlock()
-			emptyDurations := []time.Duration{}
-			emptyInst := []time.Duration{}
-			http.NotFound(w, r)
-			log.Printf("dev: %s %s status=404 %s", r.Method, r.URL.Path, formatDurationParts(time.Since(start), emptyDurations, emptyInst))
-			return
-		}
-
-		inputBytes, err := os.ReadFile(route.filePath)
-		if err != nil {
-			stateMu.RUnlock()
-			emptyDurations := []time.Duration{}
-			emptyInst := []time.Duration{}
-			writeDevError(w, err)
-			log.Printf("dev: %s %s error=%v %s", r.Method, r.URL.Path, err, formatDurationParts(time.Since(start), emptyDurations, emptyInst))
-			return
-		}
-		sourceDigest := sha256.Sum256(inputBytes)
-
-		result := chainResult{
-			output: contentData{bytes: inputBytes, encoding: dataEncodingRaw},
-			metrics: chainMetrics{
-				moduleDurations:        []time.Duration{},
-				instantiationDurations: []time.Duration{},
-			},
-		}
-		_, hasRecipes := state.recipeChains[route.sourceMIME]
-		if hasRecipes {
-			chain := state.recipeChains[route.sourceMIME]
-			ctx := context.Background()
-			ctx, cancel := wasmruntime.WithExecutionTimeout(ctx, 100*time.Millisecond)
-			defer cancel()
-			result, err = chain.run(ctx, inputBytes, reqID)
-			if err != nil {
-				stateMu.RUnlock()
-				writeDevError(w, err)
-				log.Printf("dev: %s %s error=%v %s", r.Method, r.URL.Path, err, formatDurationParts(time.Since(start), result.metrics.moduleDurations, result.metrics.instantiationDurations))
-				return
-			}
-		}
-
-		body, err := formatOutputBytes(result.output)
-		if err != nil {
-			stateMu.RUnlock()
-			writeDevError(w, err)
-			log.Printf("dev: %s %s error=%v %s", r.Method, r.URL.Path, err, formatDurationParts(time.Since(start), result.metrics.moduleDurations, result.metrics.instantiationDurations))
-			return
-		}
-		contentType := devResponseContentType(route.sourceMIME, hasRecipes, result.output, body)
-		formDigests := make([][32]byte, 0)
-		if strings.HasPrefix(contentType, "text/html") {
-			body, formDigests, err = injectQIPFormRuntime(body, state.formModules, state.formDigests)
-			if err != nil {
-				stateMu.RUnlock()
-				writeDevError(w, err)
-				log.Printf("dev: %s %s error=%v %s", r.Method, r.URL.Path, err, formatDurationParts(time.Since(start), result.metrics.moduleDurations, result.metrics.instantiationDurations))
-				return
-			}
-		}
-
-		etag := buildDevETag(sourceDigest, state.recipeDigests[route.sourceMIME], formDigests)
-		stateMu.RUnlock()
-		if etag != "" {
-			w.Header().Set("ETag", etag)
-			if r.Header.Get("If-None-Match") == etag {
-				w.WriteHeader(http.StatusNotModified)
-				log.Printf("dev: %s %s status=304 %s", r.Method, r.URL.Path, formatDurationParts(time.Since(start), result.metrics.moduleDurations, result.metrics.instantiationDurations))
-				return
-			}
-		}
-		w.Header().Set("Content-Type", contentType)
-		w.WriteHeader(http.StatusOK)
-		if r.Method != http.MethodHead {
-			if _, err := w.Write(body); err != nil {
-				log.Printf("dev: %s %s write_error=%v %s", r.Method, r.URL.Path, err, formatDurationParts(time.Since(start), result.metrics.moduleDurations, result.metrics.instantiationDurations))
-				return
-			}
-		}
-		log.Printf("dev: %s %s status=200 %s", r.Method, r.URL.Path, formatDurationParts(time.Since(start), result.metrics.moduleDurations, result.metrics.instantiationDurations))
-	})
+	handler := newDevRequestHandler("dev", &stateMu, &state, reloadRecipesIfChanged)
 
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -1984,8 +1885,293 @@ func devCmd(args []string) {
 	}
 }
 
+func requestCmd(args []string) {
+	opts := options{}
+	var recipesRoot string
+	var formsRoot string
+	var modeRaw string
+	var methodRaw string
+
+	fs := flag.NewFlagSet("request", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var requestVerbose bool
+	fs.BoolVar(&requestVerbose, "v", false, "enable verbose logging")
+	fs.BoolVar(&requestVerbose, "verbose", false, "enable verbose logging")
+	fs.StringVar(&recipesRoot, "recipes", "", "recipe modules root directory")
+	fs.StringVar(&formsRoot, "forms", "", "form modules root directory")
+	fs.StringVar(&modeRaw, "mode", string(modeDev), "runtime mode: dev or prod")
+	fs.StringVar(&methodRaw, "X", http.MethodGet, "request method (GET or HEAD)")
+	fs.StringVar(&methodRaw, "method", http.MethodGet, "request method (GET or HEAD)")
+	if err := fs.Parse(normalizeRequestArgs(args)); err != nil {
+		gameOver("%s %v", usageRequest, err)
+	}
+
+	mode, err := parseRuntimeMode(modeRaw)
+	if err != nil {
+		gameOver("%v", err)
+	}
+	method, err := parseRequestMethod(methodRaw)
+	if err != nil {
+		gameOver("%v", err)
+	}
+
+	opts.verbose = requestVerbose
+	opts.mode = mode
+
+	rest := fs.Args()
+	if len(rest) != 2 {
+		gameOver(usageRequest)
+	}
+	contentRoot := rest[0]
+	requestPath := rest[1]
+	if requestPath == "" {
+		requestPath = "/"
+	}
+
+	contentInfo, err := os.Stat(contentRoot)
+	if err != nil {
+		gameOver("Invalid content directory: %v", err)
+	}
+	if !contentInfo.IsDir() {
+		gameOver("Invalid content directory: %q is not a directory", contentRoot)
+	}
+
+	if recipesRoot != "" {
+		recipeInfo, err := os.Stat(recipesRoot)
+		if err != nil {
+			gameOver("Invalid recipes directory: %v", err)
+		}
+		if !recipeInfo.IsDir() {
+			gameOver("Invalid recipes directory: %q is not a directory", recipesRoot)
+		}
+	}
+
+	if formsRoot != "" {
+		formInfo, err := os.Stat(formsRoot)
+		if err != nil {
+			gameOver("Invalid forms directory: %v", err)
+		}
+		if !formInfo.IsDir() {
+			gameOver("Invalid forms directory: %q is not a directory", formsRoot)
+		}
+	}
+
+	state, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts)
+	if err != nil {
+		gameOver("%v", err)
+	}
+	var stateMu sync.RWMutex
+	var reloadMu sync.Mutex
+	defer func() {
+		stateMu.Lock()
+		current := state
+		state = nil
+		stateMu.Unlock()
+		if current != nil {
+			closeModuleChains(context.Background(), current.recipeChains)
+		}
+	}()
+
+	reloadRecipesIfChanged := func() {
+		if opts.mode != modeDev || recipesRoot == "" {
+			return
+		}
+
+		reloadMu.Lock()
+		defer reloadMu.Unlock()
+
+		stamps, err := scanRecipeModuleStamps(recipesRoot)
+		if err != nil {
+			log.Printf("request: recipe change check failed: %v", err)
+			return
+		}
+
+		stateMu.RLock()
+		currentStamps := state.recipeStamps
+		unchanged := recipeModuleStampsEqual(currentStamps, stamps)
+		stateMu.RUnlock()
+		if unchanged {
+			return
+		}
+
+		reloadStart := time.Now()
+		nextState, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts)
+		if err != nil {
+			log.Printf("request: auto-reload failed reason=recipe_change error=%v", err)
+			return
+		}
+
+		stateMu.Lock()
+		previous := state
+		state = nextState
+		stateMu.Unlock()
+		if previous != nil {
+			closeModuleChains(context.Background(), previous.recipeChains)
+		}
+
+		log.Printf(
+			"request: reloaded reason=recipe_change paths=%d recipe_mimes=%d forms=%d duration_ms=%d",
+			len(nextState.contentRoutes),
+			len(nextState.recipeChains),
+			len(nextState.formModules),
+			time.Since(reloadStart).Milliseconds(),
+		)
+	}
+
+	handler := newDevRequestHandler("request", &stateMu, &state, reloadRecipesIfChanged)
+	response, err := qinternal.ServeInProcessHTTP(handler, method, requestPath, nil)
+	if err != nil {
+		gameOver("%v", err)
+	}
+
+	if contentType := response.Header.Get("Content-Type"); contentType != "" {
+		log.Printf("request: Content-Type: %s", contentType)
+	}
+	if etag := response.Header.Get("ETag"); etag != "" {
+		log.Printf("request: ETag: %s", etag)
+	}
+	contentLength := response.Header.Get("Content-Length")
+	if contentLength == "" {
+		contentLength = strconv.Itoa(len(response.Body))
+	}
+	log.Printf("request: Content-Length: %s", contentLength)
+
+	if method != http.MethodHead && len(response.Body) > 0 {
+		if _, err := os.Stdout.Write(response.Body); err != nil {
+			gameOver("Error writing response body: %v", err)
+		}
+	}
+
+	if response.StatusCode >= http.StatusBadRequest {
+		statusText := http.StatusText(response.StatusCode)
+		if statusText == "" {
+			gameOver("%d", response.StatusCode)
+		}
+		gameOver("%d %s", response.StatusCode, statusText)
+	}
+}
+
+func parseRequestMethod(raw string) (string, error) {
+	method := strings.ToUpper(strings.TrimSpace(raw))
+	switch method {
+	case http.MethodGet, http.MethodHead:
+		return method, nil
+	default:
+		return "", fmt.Errorf("invalid method %q (expected GET or HEAD)", raw)
+	}
+}
+
+func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRuntimeState, reloadRecipesIfChanged func()) http.Handler {
+	return qinternal.NewRequestHandler(qinternal.RequestHandlerConfig{
+		LogPrefix: logPrefix,
+		Reload:    reloadRecipesIfChanged,
+		WriteError: func(w http.ResponseWriter, err error) {
+			writeDevError(w, err)
+		},
+		FormatDuration: formatDurationParts,
+		Logf: func(format string, args ...any) {
+			log.Printf(format, args...)
+		},
+		Resolve: func(r *http.Request, reqID uint64) (qinternal.RoutedResponse, error) {
+			stateMu.RLock()
+			current := *state
+			if current == nil {
+				stateMu.RUnlock()
+				return qinternal.RoutedResponse{}, errors.New("runtime state is unavailable")
+			}
+
+			route, ok := qinternal.ResolveContentRoute(current.contentRoutes, r.URL.Path)
+			if !ok {
+				stateMu.RUnlock()
+				return qinternal.RoutedResponse{
+					StatusCode: http.StatusNotFound,
+					Header:     http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
+					Body:       []byte("404 page not found\n"),
+				}, nil
+			}
+
+			inputBytes, err := os.ReadFile(route.FilePath)
+			if err != nil {
+				stateMu.RUnlock()
+				return qinternal.RoutedResponse{}, err
+			}
+			sourceDigest := sha256.Sum256(inputBytes)
+
+			result := chainResult{
+				output: contentData{bytes: inputBytes, encoding: dataEncodingRaw},
+				metrics: chainMetrics{
+					moduleDurations:        []time.Duration{},
+					instantiationDurations: []time.Duration{},
+				},
+			}
+			_, hasRecipes := current.recipeChains[route.SourceMIME]
+			if hasRecipes {
+				chain := current.recipeChains[route.SourceMIME]
+				ctx := context.Background()
+				ctx, cancel := wasmruntime.WithExecutionTimeout(ctx, 100*time.Millisecond)
+				defer cancel()
+				result, err = chain.run(ctx, inputBytes, reqID)
+				if err != nil {
+					stateMu.RUnlock()
+					return qinternal.RoutedResponse{
+						ModuleDurations:        result.metrics.moduleDurations,
+						InstantiationDurations: result.metrics.instantiationDurations,
+					}, err
+				}
+			}
+
+			body, err := formatOutputBytes(result.output)
+			if err != nil {
+				stateMu.RUnlock()
+				return qinternal.RoutedResponse{
+					ModuleDurations:        result.metrics.moduleDurations,
+					InstantiationDurations: result.metrics.instantiationDurations,
+				}, err
+			}
+
+			contentType := devResponseContentType(route.SourceMIME, hasRecipes, result.output, body)
+			formDigests := make([][32]byte, 0)
+			if strings.HasPrefix(contentType, "text/html") {
+				body, formDigests, err = injectQIPFormRuntime(body, current.formModules, current.formDigests)
+				if err != nil {
+					stateMu.RUnlock()
+					return qinternal.RoutedResponse{
+						ModuleDurations:        result.metrics.moduleDurations,
+						InstantiationDurations: result.metrics.instantiationDurations,
+					}, err
+				}
+			}
+
+			headers := make(http.Header)
+			headers.Set("Content-Type", contentType)
+			etag := buildDevETag(sourceDigest, current.recipeDigests[route.SourceMIME], formDigests)
+			if etag != "" {
+				headers.Set("ETag", etag)
+				if r.Header.Get("If-None-Match") == etag {
+					stateMu.RUnlock()
+					return qinternal.RoutedResponse{
+						StatusCode:             http.StatusNotModified,
+						Header:                 headers,
+						ModuleDurations:        result.metrics.moduleDurations,
+						InstantiationDurations: result.metrics.instantiationDurations,
+					}, nil
+				}
+			}
+			stateMu.RUnlock()
+
+			return qinternal.RoutedResponse{
+				StatusCode:             http.StatusOK,
+				Header:                 headers,
+				Body:                   body,
+				ModuleDurations:        result.metrics.moduleDurations,
+				InstantiationDurations: result.metrics.instantiationDurations,
+			}, nil
+		},
+	})
+}
+
 func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot string, formsRoot string, opts options) (*devRuntimeState, error) {
-	contentRoutes, err := buildDevContentRoutes(contentRoot)
+	contentRoutes, err := qinternal.BuildContentRoutes(contentRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -2028,6 +2214,45 @@ func normalizeDevArgs(args []string) []string {
 	return normalized
 }
 
+func normalizeRequestArgs(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+
+	flagsWithValue := map[string]struct{}{
+		"--recipes": {},
+		"--forms":   {},
+		"--mode":    {},
+		"-X":        {},
+		"--method":  {},
+	}
+
+	normalized := make([]string, 0, len(args))
+	positionals := make([]string, 0, 2)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(arg, "-") && arg != "-" {
+			normalized = append(normalized, arg)
+			if strings.Contains(arg, "=") {
+				continue
+			}
+			if _, ok := flagsWithValue[arg]; ok && i+1 < len(args) {
+				i++
+				normalized = append(normalized, args[i])
+			}
+			continue
+		}
+		positionals = append(positionals, arg)
+	}
+
+	normalized = append(normalized, positionals...)
+	return normalized
+}
+
 func parseRuntimeMode(raw string) (runtimeMode, error) {
 	mode := runtimeMode(strings.ToLower(strings.TrimSpace(raw)))
 	switch mode {
@@ -2036,160 +2261,6 @@ func parseRuntimeMode(raw string) (runtimeMode, error) {
 	default:
 		return "", fmt.Errorf("invalid mode %q (expected dev or prod)", raw)
 	}
-}
-
-func buildDevContentRoutes(contentRoot string) (map[string]devContentRoute, error) {
-	files := make([]struct {
-		rel  string
-		full string
-	}, 0, 32)
-	err := filepath.WalkDir(contentRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !d.Type().IsRegular() {
-			return fmt.Errorf("content entry %q must be a regular file", fullPath)
-		}
-		relPath, err := filepath.Rel(contentRoot, fullPath)
-		if err != nil {
-			return err
-		}
-		relPath = filepath.ToSlash(relPath)
-		if !utf8.ValidString(relPath) {
-			return fmt.Errorf("content path %q must be valid UTF-8", relPath)
-		}
-		if strings.Contains(relPath, "\\") {
-			return fmt.Errorf("content path %q must not contain backslash", relPath)
-		}
-		if strings.HasPrefix(relPath, "/") {
-			return fmt.Errorf("content path %q must not start with /", relPath)
-		}
-		cleanRel := path.Clean(relPath)
-		if cleanRel != relPath || cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, "../") {
-			return fmt.Errorf("content path %q is not canonical", relPath)
-		}
-		files = append(files, struct {
-			rel  string
-			full string
-		}{rel: relPath, full: fullPath})
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].rel < files[j].rel
-	})
-
-	routes := make(map[string]devContentRoute, len(files))
-	for _, entry := range files {
-		aliases := contentRequestPaths(entry.rel)
-		route := devContentRoute{
-			filePath:   entry.full,
-			sourceMIME: detectSourceMIME(entry.rel),
-		}
-		for _, requestPath := range aliases {
-			if prev, exists := routes[requestPath]; exists && prev.filePath != route.filePath {
-				return nil, fmt.Errorf("duplicate route path %q for %q and %q", requestPath, prev.filePath, route.filePath)
-			}
-			routes[requestPath] = route
-		}
-	}
-
-	return routes, nil
-}
-
-func contentRequestPaths(relPath string) []string {
-	out := make([]string, 0, 4)
-	appendUnique := func(value string) {
-		if slices.Contains(out, value) {
-			return
-		}
-		out = append(out, value)
-	}
-
-	appendUnique("/" + relPath)
-	ext := path.Ext(relPath)
-	lowerExt := strings.ToLower(ext)
-	if lowerExt == ".html" || lowerExt == ".md" || lowerExt == ".markdown" {
-		base := path.Base(relPath)
-		if strings.EqualFold(base, "index"+ext) {
-			dir := path.Dir(relPath)
-			if dir == "." {
-				appendUnique("/")
-			} else {
-				appendUnique("/" + dir)
-				appendUnique("/" + dir + "/")
-			}
-		} else {
-			appendUnique("/" + strings.TrimSuffix(relPath, ext))
-		}
-	}
-	return out
-}
-
-func detectSourceMIME(relPath string) string {
-	ext := strings.ToLower(path.Ext(relPath))
-	switch ext {
-	case ".md", ".markdown":
-		return "text/markdown"
-	}
-
-	mimeType := mime.TypeByExtension(ext)
-	if mimeType == "" {
-		return "application/octet-stream"
-	}
-	if cut := strings.IndexByte(mimeType, ';'); cut != -1 {
-		mimeType = strings.TrimSpace(mimeType[:cut])
-	}
-	if mimeType == "" {
-		return "application/octet-stream"
-	}
-	return mimeType
-}
-
-func resolveDevContentRoute(routes map[string]devContentRoute, requestPath string) (devContentRoute, bool) {
-	if requestPath == "" {
-		requestPath = "/"
-	}
-	if !strings.HasPrefix(requestPath, "/") {
-		requestPath = "/" + requestPath
-	}
-
-	candidates := []string{requestPath}
-	clean := path.Clean(requestPath)
-	if clean == "." {
-		clean = "/"
-	}
-	if !strings.HasPrefix(clean, "/") {
-		clean = "/" + clean
-	}
-	if clean != requestPath {
-		candidates = append(candidates, clean)
-	}
-	if requestPath != "/" {
-		if before, ok := strings.CutSuffix(requestPath, "/"); ok {
-			candidates = append(candidates, before)
-		} else {
-			candidates = append(candidates, requestPath+"/")
-		}
-	}
-
-	seen := make(map[string]struct{}, len(candidates))
-	for _, candidate := range candidates {
-		if _, ok := seen[candidate]; ok {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		if route, ok := routes[candidate]; ok {
-			return route, true
-		}
-	}
-	return devContentRoute{}, false
 }
 
 func parseRecipeFilename(filename string) (order int, disabled bool, err error) {
