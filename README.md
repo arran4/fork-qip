@@ -124,8 +124,9 @@ qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/col
 
 - [ ] Add digest pinning for remote modules (for example `https://...#sha256=<hex>`), and fail fast when fetched bytes do not match the pinned digest.
 - [ ] Update docs to encourage hard failure with traps instead of returning empty output which could lead to data loss.
-- [ ] Add `qip router build` for building a web app.
+- [ ] Add `qip build static` for building static HTML web app from a directory of files.
 - [ ] Add `qip serve` command that runs the server in `prod` mode by default.
+- [ ] Add `qip photocopy` command that observes an existing tool’s input/output behavior and generates a behaviorally similar QIP module implementation in wasm, then validates it with duel/fuzz tests and reports divergences.
 
 ## Documentation
 
