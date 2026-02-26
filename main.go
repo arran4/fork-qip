@@ -1691,6 +1691,7 @@ type moduleFileStamp struct {
 
 type devRuntimeState struct {
 	contentRoutes map[string]qinternal.ContentRoute
+	routeOptions  qinternal.RouteOptions
 	recipeChains  map[string]*moduleChain
 	recipeDigests map[string][][32]byte
 	recipeStamps  map[string]moduleFileStamp
@@ -1761,7 +1762,8 @@ func devCmd(args []string) {
 		}
 	}
 
-	state, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts)
+	routeOptions := qinternal.DefaultRouteOptions()
+	state, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts, routeOptions)
 	if err != nil {
 		gameOver("%v", err)
 	}
@@ -1781,7 +1783,7 @@ func devCmd(args []string) {
 		defer reloadMu.Unlock()
 
 		reloadStart := time.Now()
-		nextState, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts)
+		nextState, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts, routeOptions)
 		if err != nil {
 			log.Printf("dev: reload failed reason=%s error=%v", reason, err)
 			return
@@ -1813,7 +1815,7 @@ func devCmd(args []string) {
 		}
 
 		reloadStart := time.Now()
-		nextState, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts)
+		nextState, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts, routeOptions)
 		if err != nil {
 			log.Printf("dev: auto-reload failed reason=recipe_change error=%v", err)
 			return
@@ -1842,7 +1844,7 @@ func devCmd(args []string) {
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	handler := newDevRequestHandler("dev", &stateMu, &state, reloadRecipesIfChanged)
+	handler := newDevRequestHandler("dev", &stateMu, &state, reloadRecipesIfChanged, routeOptions)
 
 	server := &http.Server{
 		Addr:    addr,
@@ -1956,7 +1958,8 @@ func requestCmd(args []string) {
 		}
 	}
 
-	state, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts)
+	routeOptions := qinternal.DefaultRouteOptions()
+	state, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts, routeOptions)
 	if err != nil {
 		gameOver("%v", err)
 	}
@@ -1971,7 +1974,7 @@ func requestCmd(args []string) {
 		}
 	}()
 
-	handler := newDevRequestHandler("request", &stateMu, &state, nil)
+	handler := newDevRequestHandler("request", &stateMu, &state, nil, routeOptions)
 	response, err := qinternal.ServeInProcessHTTP(handler, method, requestPath, nil)
 	if err != nil {
 		gameOver("%v", err)
@@ -1982,6 +1985,9 @@ func requestCmd(args []string) {
 	}
 	if etag := response.Header.Get("ETag"); etag != "" {
 		log.Printf("request: ETag: %s", etag)
+	}
+	if location := response.Header.Get("Location"); location != "" {
+		log.Printf("request: Location: %s", location)
 	}
 	contentLength := response.Header.Get("Content-Length")
 	if contentLength == "" {
@@ -2014,10 +2020,11 @@ func parseRequestMethod(raw string) (string, error) {
 	}
 }
 
-func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRuntimeState, reloadRecipesIfChanged func()) http.Handler {
+func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRuntimeState, reloadRecipesIfChanged func(), routeOptions qinternal.RouteOptions) http.Handler {
 	return qinternal.NewRequestHandler(qinternal.RequestHandlerConfig{
-		LogPrefix: logPrefix,
-		Reload:    reloadRecipesIfChanged,
+		LogPrefix:    logPrefix,
+		RouteOptions: routeOptions,
+		Reload:       reloadRecipesIfChanged,
 		WriteError: func(w http.ResponseWriter, err error) {
 			writeDevError(w, err)
 		},
@@ -2033,7 +2040,7 @@ func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRu
 				return qinternal.RoutedResponse{}, errors.New("runtime state is unavailable")
 			}
 
-			route, ok := qinternal.ResolveContentRoute(current.contentRoutes, r.URL.Path)
+			route, ok := qinternal.ResolveContentRoute(current.contentRoutes, r.URL.Path, current.routeOptions)
 			if !ok {
 				stateMu.RUnlock()
 				return qinternal.RoutedResponse{
@@ -2123,8 +2130,8 @@ func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRu
 	})
 }
 
-func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot string, formsRoot string, opts options) (*devRuntimeState, error) {
-	contentRoutes, err := qinternal.BuildContentRoutes(contentRoot)
+func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot string, formsRoot string, opts options, routeOptions qinternal.RouteOptions) (*devRuntimeState, error) {
+	contentRoutes, err := qinternal.BuildContentRoutes(contentRoot, routeOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -2144,6 +2151,7 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 	}
 	return &devRuntimeState{
 		contentRoutes: contentRoutes,
+		routeOptions:  routeOptions,
 		recipeChains:  recipeChains,
 		recipeDigests: recipeDigests,
 		recipeStamps:  recipeStamps,

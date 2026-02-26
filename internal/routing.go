@@ -29,6 +29,23 @@ type ContentRoute struct {
 	SourceMIME string
 }
 
+type TrailingSlashMode string
+
+const (
+	TrailingSlashModeNever  TrailingSlashMode = "never"
+	TrailingSlashModeAlways TrailingSlashMode = "always"
+)
+
+type RouteOptions struct {
+	TrailingSlashMode TrailingSlashMode
+}
+
+func DefaultRouteOptions() RouteOptions {
+	return RouteOptions{
+		TrailingSlashMode: TrailingSlashModeNever,
+	}
+}
+
 type RoutedResponse struct {
 	StatusCode             int
 	Header                 http.Header
@@ -39,6 +56,7 @@ type RoutedResponse struct {
 
 type RequestHandlerConfig struct {
 	LogPrefix      string
+	RouteOptions   RouteOptions
 	Reload         func()
 	Resolve        func(r *http.Request, requestID uint64) (RoutedResponse, error)
 	WriteError     func(http.ResponseWriter, error)
@@ -63,6 +81,7 @@ func NewRequestHandler(config RequestHandlerConfig) http.Handler {
 			return fmt.Sprintf("duration_ms=%d", total.Milliseconds())
 		}
 	}
+	routeOptions := normalizeRouteOptions(config.RouteOptions)
 
 	mux := http.NewServeMux()
 	var requestID uint64
@@ -74,6 +93,19 @@ func NewRequestHandler(config RequestHandlerConfig) http.Handler {
 			emptyInst := []time.Duration{}
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			logf("%s: %s %s %s", config.LogPrefix, r.Method, r.URL.Path, formatDuration(time.Since(start), emptyDurations, emptyInst))
+			return
+		}
+
+		if canonicalPath, changed := CanonicalRequestPath(r.URL.Path, routeOptions); changed {
+			location := canonicalPath
+			if r.URL.RawQuery != "" {
+				location += "?" + r.URL.RawQuery
+			}
+			w.Header().Set("Location", location)
+			w.WriteHeader(http.StatusPermanentRedirect)
+			emptyDurations := []time.Duration{}
+			emptyInst := []time.Duration{}
+			logf("%s: %s %s status=%d %s", config.LogPrefix, r.Method, r.URL.Path, http.StatusPermanentRedirect, formatDuration(time.Since(start), emptyDurations, emptyInst))
 			return
 		}
 
@@ -157,7 +189,55 @@ func ServeInProcessHTTP(handler http.Handler, method string, requestPath string,
 	}, nil
 }
 
-func BuildContentRoutes(contentRoot string) (map[string]ContentRoute, error) {
+func CanonicalRequestPath(requestPath string, options RouteOptions) (string, bool) {
+	options = normalizeRouteOptions(options)
+	original := requestPath
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	if !strings.HasPrefix(requestPath, "/") {
+		requestPath = "/" + requestPath
+	}
+
+	canonical := path.Clean(requestPath)
+	if canonical == "." {
+		canonical = "/"
+	}
+	if !strings.HasPrefix(canonical, "/") {
+		canonical = "/" + canonical
+	}
+
+		if canonical != "/" {
+			switch options.TrailingSlashMode {
+			case TrailingSlashModeNever:
+				canonical = strings.TrimSuffix(canonical, "/")
+				if canonical == "" {
+					canonical = "/"
+				}
+		case TrailingSlashModeAlways:
+			if !strings.HasSuffix(canonical, "/") {
+				canonical += "/"
+			}
+		}
+	}
+
+	if original == "" {
+		return canonical, canonical != "/"
+	}
+	return canonical, canonical != original
+}
+
+func normalizeRouteOptions(options RouteOptions) RouteOptions {
+	switch options.TrailingSlashMode {
+	case TrailingSlashModeNever, TrailingSlashModeAlways:
+		return options
+	default:
+		return DefaultRouteOptions()
+	}
+}
+
+func BuildContentRoutes(contentRoot string, options RouteOptions) (map[string]ContentRoute, error) {
+	options = normalizeRouteOptions(options)
 	files := make([]struct {
 		rel  string
 		full string
@@ -206,7 +286,7 @@ func BuildContentRoutes(contentRoot string) (map[string]ContentRoute, error) {
 
 	routes := make(map[string]ContentRoute, len(files))
 	for _, entry := range files {
-		aliases := contentRequestPaths(entry.rel)
+		aliases := contentRequestPaths(entry.rel, options)
 		route := ContentRoute{
 			FilePath:   entry.full,
 			SourceMIME: detectSourceMIME(entry.rel),
@@ -222,7 +302,8 @@ func BuildContentRoutes(contentRoot string) (map[string]ContentRoute, error) {
 	return routes, nil
 }
 
-func ResolveContentRoute(routes map[string]ContentRoute, requestPath string) (ContentRoute, bool) {
+func ResolveContentRoute(routes map[string]ContentRoute, requestPath string, options RouteOptions) (ContentRoute, bool) {
+	options = normalizeRouteOptions(options)
 	if requestPath == "" {
 		requestPath = "/"
 	}
@@ -242,10 +323,16 @@ func ResolveContentRoute(routes map[string]ContentRoute, requestPath string) (Co
 		candidates = append(candidates, clean)
 	}
 	if requestPath != "/" {
-		if before, ok := strings.CutSuffix(requestPath, "/"); ok {
-			candidates = append(candidates, before)
+		noSlash := strings.TrimSuffix(requestPath, "/")
+		withSlash := noSlash + "/"
+		if noSlash == "" {
+			noSlash = "/"
+			withSlash = "/"
+		}
+		if options.TrailingSlashMode == TrailingSlashModeNever {
+			candidates = append(candidates, noSlash, withSlash)
 		} else {
-			candidates = append(candidates, requestPath+"/")
+			candidates = append(candidates, withSlash, noSlash)
 		}
 	}
 
@@ -262,7 +349,7 @@ func ResolveContentRoute(routes map[string]ContentRoute, requestPath string) (Co
 	return ContentRoute{}, false
 }
 
-func contentRequestPaths(relPath string) []string {
+func contentRequestPaths(relPath string, options RouteOptions) []string {
 	out := make([]string, 0, 4)
 	appendUnique := func(value string) {
 		if slices.Contains(out, value) {
@@ -281,8 +368,13 @@ func contentRequestPaths(relPath string) []string {
 			if dir == "." {
 				appendUnique("/")
 			} else {
-				appendUnique("/" + dir)
-				appendUnique("/" + dir + "/")
+				if options.TrailingSlashMode == TrailingSlashModeNever {
+					appendUnique("/" + dir)
+					appendUnique("/" + dir + "/")
+				} else {
+					appendUnique("/" + dir + "/")
+					appendUnique("/" + dir)
+				}
 			}
 		} else {
 			appendUnique("/" + strings.TrimSuffix(relPath, ext))

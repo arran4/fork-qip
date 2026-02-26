@@ -74,7 +74,7 @@ func TestContentRequestPaths(t *testing.T) {
 	mustWrite("guide/start.md")
 	mustWrite("images/logo.png")
 
-	routes, err := qinternal.BuildContentRoutes(root)
+	routes, err := qinternal.BuildContentRoutes(root, qinternal.DefaultRouteOptions())
 	if err != nil {
 		t.Fatalf("BuildContentRoutes: %v", err)
 	}
@@ -107,13 +107,13 @@ func TestResolveDevContentRoute(t *testing.T) {
 		"/docs/": {FilePath: "docs/index.md", SourceMIME: "text/markdown"},
 	}
 
-	if _, ok := qinternal.ResolveContentRoute(routes, "/docs"); !ok {
+	if _, ok := qinternal.ResolveContentRoute(routes, "/docs", qinternal.DefaultRouteOptions()); !ok {
 		t.Fatal("expected /docs to resolve")
 	}
-	if _, ok := qinternal.ResolveContentRoute(routes, "/docs/"); !ok {
+	if _, ok := qinternal.ResolveContentRoute(routes, "/docs/", qinternal.DefaultRouteOptions()); !ok {
 		t.Fatal("expected /docs/ to resolve")
 	}
-	if _, ok := qinternal.ResolveContentRoute(routes, "/missing"); ok {
+	if _, ok := qinternal.ResolveContentRoute(routes, "/missing", qinternal.DefaultRouteOptions()); ok {
 		t.Fatal("expected /missing to be unresolved")
 	}
 }
