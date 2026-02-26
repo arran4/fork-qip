@@ -109,6 +109,45 @@ qip dev ./public -p 4001
 kill -HUP <qip-dev-pid>
 ```
 
+### Router
+
+The router flow is content-first:
+
+1. Put content in a directory (Markdown, HTML, images, CSS, etc.).
+2. Optionally add recipe modules (for example `recipes/text/markdown/*.wasm`) to transform source files before serving.
+3. Preview locally with `qip dev`.
+4. Export the fully routed site and convert it to static files.
+
+Example content:
+
+```text
+docs/
+  index.md
+  about.md
+  images/logo.png
+recipes/
+  text/markdown/10-markdown-basic.wasm
+  text/markdown/20-html-page-wrap.wasm
+```
+
+Preview in dev mode:
+
+```bash
+qip dev ./docs --recipes ./recipes -p 4000
+```
+
+Build static output from the routed site (no intermediate `.warc` file on disk):
+
+```bash
+qip route warc ./docs --recipes ./recipes \
+  | qip run examples/warc-to-static-tar-no-trailing-slash.wasm \
+  > site.tar
+
+tar -tf site.tar
+```
+
+With the `warc-to-static-tar-no-trailing-slash` module, route paths like `/about` become `about.html` in the tar archive.
+
 ### Image
 
 You can process images through a chain of rgba shaders. It breaks the work into 64x64 tiles.
@@ -125,6 +164,8 @@ qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/col
 - [ ] Add digest pinning for remote modules (for example `https://...#sha256=<hex>`), and fail fast when fetched bytes do not match the pinned digest.
 - [ ] Update docs to encourage hard failure with traps instead of returning empty output which could lead to data loss.
 - [ ] Add `qip build static` for building static HTML web app from a directory of files.
+- [ ] Change `qip request` to `qip route get` and `qip route head`
+- [ ] Add `qip route list`
 - [ ] Add `qip serve` command that runs the server in `prod` mode by default.
 - [ ] Add `random_ptr` and `random_size` to modules that the host can detect and fill in with random data. It can choose to seed with determinism or use a cryptographic source of randomness — it’s up to the host.
 - [ ] Add `--postcondition` or `--outmust` flag to `qip run` that verifies the final output conforms to a particular module e.g. `--postcondition valid-xml-1.0.wasm`.

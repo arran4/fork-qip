@@ -38,6 +38,7 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
+	qcmd "github.com/royalicing/qip/cmd"
 	qinternal "github.com/royalicing/qip/internal"
 	"github.com/royalicing/qip/internal/wasmruntime"
 	"github.com/tetratelabs/wazero"
@@ -88,13 +89,15 @@ type options struct {
 	mode    runtimeMode
 }
 
-const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  request  Resolve one path through the dev router and print its result\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
+const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  request  Resolve one path through the dev router and print its result\n  route    Archive routed output and export route artifacts\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
 const usageRun = "Usage: qip run [-v] [-i <input>] <wasm module URL or file>..."
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value ...] ..."
 const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
 const usageDev = "Usage: qip dev <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-p <port>] [-v|--verbose]"
 const usageRequest = "Usage: qip request <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-X <GET|HEAD>] [-v|--verbose]"
+const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  warc     Archive the routed site and write a minimal WARC file"
+const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-X <GET|HEAD>] [-o <warc file or ->] [-v|--verbose]"
 const usageForm = "Usage: qip form [-v|--verbose] <wasm module URL or file>"
 const usageHelp = "Usage: qip help [command]"
 
@@ -129,6 +132,8 @@ func main() {
 		devCmd(args[1:])
 	} else if args[0] == "request" {
 		requestCmd(args[1:])
+	} else if args[0] == "route" {
+		routeCmd(args[1:])
 	} else if args[0] == "form" {
 		formCmd(args[1:])
 	} else {
@@ -156,6 +161,10 @@ func helpCmd(args []string) {
 		fmt.Println(usageDev)
 	case "request":
 		fmt.Println(usageRequest)
+	case "route":
+		fmt.Println(usageRoute)
+		fmt.Println()
+		fmt.Println(usageRouteWarc)
 	case "form":
 		fmt.Println(usageForm)
 	default:
@@ -2007,6 +2016,120 @@ func requestCmd(args []string) {
 			gameOver("%d", response.StatusCode)
 		}
 		gameOver("%d %s", response.StatusCode, statusText)
+	}
+}
+
+func routeCmd(args []string) {
+	type routeRuntime struct {
+		state        *devRuntimeState
+		handler      http.Handler
+		routeOptions qinternal.RouteOptions
+	}
+	var runtimeMu sync.Mutex
+	var runtime *routeRuntime
+	ensureRuntime := func(ctx context.Context, request qcmd.RouteWARCRequest) (*routeRuntime, error) {
+		runtimeMu.Lock()
+		defer runtimeMu.Unlock()
+		if runtime != nil {
+			return runtime, nil
+		}
+
+		mode, err := parseRuntimeMode(request.ModeRaw)
+		if err != nil {
+			return nil, err
+		}
+		opts := options{
+			verbose: request.Verbose,
+			mode:    mode,
+		}
+
+		contentInfo, err := os.Stat(request.ContentRoot)
+		if err != nil {
+			return nil, fmt.Errorf("Invalid content directory: %v", err)
+		}
+		if !contentInfo.IsDir() {
+			return nil, fmt.Errorf("Invalid content directory: %q is not a directory", request.ContentRoot)
+		}
+
+		if request.RecipesRoot != "" {
+			recipeInfo, err := os.Stat(request.RecipesRoot)
+			if err != nil {
+				return nil, fmt.Errorf("Invalid recipes directory: %v", err)
+			}
+			if !recipeInfo.IsDir() {
+				return nil, fmt.Errorf("Invalid recipes directory: %q is not a directory", request.RecipesRoot)
+			}
+		}
+
+		if request.FormsRoot != "" {
+			formInfo, err := os.Stat(request.FormsRoot)
+			if err != nil {
+				return nil, fmt.Errorf("Invalid forms directory: %v", err)
+			}
+			if !formInfo.IsDir() {
+				return nil, fmt.Errorf("Invalid forms directory: %q is not a directory", request.FormsRoot)
+			}
+		}
+
+		routeOptions := qinternal.DefaultRouteOptions()
+		state, err := loadDevRuntimeState(ctx, request.ContentRoot, request.RecipesRoot, request.FormsRoot, opts, routeOptions)
+		if err != nil {
+			return nil, err
+		}
+		var stateMu sync.RWMutex
+		handler := newDevRequestHandler("route", &stateMu, &state, nil, routeOptions)
+		runtime = &routeRuntime{
+			state:        state,
+			handler:      handler,
+			routeOptions: routeOptions,
+		}
+		return runtime, nil
+	}
+	defer func() {
+		runtimeMu.Lock()
+		defer runtimeMu.Unlock()
+		if runtime == nil || runtime.state == nil {
+			return
+		}
+		closeModuleChains(context.Background(), runtime.state.recipeChains)
+		runtime.state = nil
+	}()
+
+	if err := qcmd.RunRoute(args, qcmd.RouteConfig{
+		UsageRoute:     usageRoute,
+		UsageRouteWarc: usageRouteWarc,
+		DefaultMode:    string(modeDev),
+		ListWARCPaths: func(ctx context.Context, request qcmd.RouteWARCRequest) ([]string, error) {
+			loaded, err := ensureRuntime(ctx, request)
+			if err != nil {
+				return nil, err
+			}
+
+			pathSet := make(map[string]struct{}, len(loaded.state.contentRoutes))
+			for requestPath := range loaded.state.contentRoutes {
+				canonical, _ := qinternal.CanonicalRequestPath(requestPath, loaded.routeOptions)
+				pathSet[canonical] = struct{}{}
+			}
+
+			paths := make([]string, 0, len(pathSet))
+			for requestPath := range pathSet {
+				paths = append(paths, requestPath)
+			}
+			sort.Strings(paths)
+			return paths, nil
+		},
+		ResolveWARC: func(ctx context.Context, request qcmd.RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			loaded, err := ensureRuntime(ctx, request)
+			if err != nil {
+				return qinternal.InProcessHTTPResponse{}, err
+			}
+			return qinternal.ServeInProcessHTTP(loaded.handler, request.Method, request.RequestPath, nil)
+		},
+		Verbosef: func(format string, args ...any) {
+			log.Printf(format, args...)
+		},
+	}); err != nil {
+		gameOver("%v", err)
 	}
 }
 
