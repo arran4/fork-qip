@@ -207,13 +207,13 @@ func CanonicalRequestPath(requestPath string, options RouteOptions) (string, boo
 		canonical = "/" + canonical
 	}
 
-		if canonical != "/" {
-			switch options.TrailingSlashMode {
-			case TrailingSlashModeNever:
-				canonical = strings.TrimSuffix(canonical, "/")
-				if canonical == "" {
-					canonical = "/"
-				}
+	if canonical != "/" {
+		switch options.TrailingSlashMode {
+		case TrailingSlashModeNever:
+			canonical = strings.TrimSuffix(canonical, "/")
+			if canonical == "" {
+				canonical = "/"
+			}
 		case TrailingSlashModeAlways:
 			if !strings.HasSuffix(canonical, "/") {
 				canonical += "/"
