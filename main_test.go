@@ -137,6 +137,41 @@ func TestNormalizeDevArgs(t *testing.T) {
 	})
 }
 
+func TestNormalizeRouteArgs(t *testing.T) {
+	in := []string{"docs/", "--recipes", "recipes/", "--mode", "dev"}
+	got := normalizeRouteArgs(in)
+	want := []string{"--recipes", "recipes/", "--mode", "dev", "docs/"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args=%v, want %v", got, want)
+	}
+}
+
+func TestBuildRouteListEntries(t *testing.T) {
+	state := &devRuntimeState{
+		contentRoutes: map[string]qinternal.ContentRoute{
+			"/about":        {FilePath: "docs/about.md", SourceMIME: "text/markdown"},
+			"/about/":       {FilePath: "docs/about.md", SourceMIME: "text/markdown"},
+			"/images/logo":  {FilePath: "docs/images/logo.png", SourceMIME: "image/png"},
+			"/images/logo/": {FilePath: "docs/images/logo.png", SourceMIME: "image/png"},
+		},
+		routeOptions: qinternal.DefaultRouteOptions(),
+		recipeChains: map[string]*moduleChain{
+			"text/markdown": nil,
+		},
+	}
+
+	got := buildRouteListEntries(state)
+	want := []routeListEntry{
+		{Method: "GET", Path: "/about", ContentType: "text/html"},
+		{Method: "HEAD", Path: "/about", ContentType: "text/html"},
+		{Method: "GET", Path: "/images/logo", ContentType: "image/png"},
+		{Method: "HEAD", Path: "/images/logo", ContentType: "image/png"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("entries=%v, want %v", got, want)
+	}
+}
+
 func TestRunDelayedStdinDoesNotFailExportResolution(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=TestHelperRunModuleCLI", "--", "examples/html-aria-extractor.wasm")
 	cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")

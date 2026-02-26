@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"log"
 	"math"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -95,9 +96,10 @@ const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchti
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value ...] ..."
 const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
 const usageDev = "Usage: qip dev <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-p <port>] [-v|--verbose]"
-const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  get      Resolve one GET path through the dev router and print the result\n  head     Resolve one HEAD path through the dev router and print headers\n  warc     Archive the routed site and write a minimal WARC file"
+const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  get      Resolve one GET path through the dev router and print the result\n  head     Resolve one HEAD path through the dev router and print headers\n  list     List routed paths and content types\n  warc     Archive the routed site and write a minimal WARC file"
 const usageRouteGet = "Usage: qip route get <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteHead = "Usage: qip route head <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
+const usageRouteList = "Usage: qip route list <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-X <GET|HEAD>] [-o <warc file or ->] [-v|--verbose]"
 const usageForm = "Usage: qip form [-v|--verbose] <wasm module URL or file>"
 const usageHelp = "Usage: qip help [command]"
@@ -164,6 +166,8 @@ func helpCmd(args []string) {
 		fmt.Println(usageRouteGet)
 		fmt.Println()
 		fmt.Println(usageRouteHead)
+		fmt.Println()
+		fmt.Println(usageRouteList)
 		fmt.Println()
 		fmt.Println(usageRouteWarc)
 	case "form":
@@ -1911,7 +1915,7 @@ func routePathCmd(args []string, method string, usage string, logPrefix string) 
 	fs.StringVar(&recipesRoot, "recipes", "", "recipe modules root directory")
 	fs.StringVar(&formsRoot, "forms", "", "form modules root directory")
 	fs.StringVar(&modeRaw, "mode", string(modeDev), "runtime mode: dev or prod")
-	if err := fs.Parse(normalizeRoutePathArgs(args)); err != nil {
+	if err := fs.Parse(normalizeRouteArgs(args)); err != nil {
 		gameOver("%s %v", usage, err)
 	}
 
@@ -2013,6 +2017,147 @@ func routePathCmd(args []string, method string, usage string, logPrefix string) 
 	}
 }
 
+type routeListEntry struct {
+	Method      string
+	Path        string
+	ContentType string
+}
+
+func routeListCmd(args []string) {
+	opts := options{}
+	var recipesRoot string
+	var formsRoot string
+	var modeRaw string
+
+	fs := flag.NewFlagSet("route list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var routeVerbose bool
+	fs.BoolVar(&routeVerbose, "v", false, "enable verbose logging")
+	fs.BoolVar(&routeVerbose, "verbose", false, "enable verbose logging")
+	fs.StringVar(&recipesRoot, "recipes", "", "recipe modules root directory")
+	fs.StringVar(&formsRoot, "forms", "", "form modules root directory")
+	fs.StringVar(&modeRaw, "mode", string(modeDev), "runtime mode: dev or prod")
+	if err := fs.Parse(normalizeRouteArgs(args)); err != nil {
+		gameOver("%s %v", usageRouteList, err)
+	}
+
+	mode, err := parseRuntimeMode(modeRaw)
+	if err != nil {
+		gameOver("%v", err)
+	}
+
+	opts.verbose = routeVerbose
+	opts.mode = mode
+
+	rest := fs.Args()
+	if len(rest) != 1 {
+		gameOver("%s", usageRouteList)
+	}
+	contentRoot := rest[0]
+
+	contentInfo, err := os.Stat(contentRoot)
+	if err != nil {
+		gameOver("Invalid content directory: %v", err)
+	}
+	if !contentInfo.IsDir() {
+		gameOver("Invalid content directory: %q is not a directory", contentRoot)
+	}
+
+	if recipesRoot != "" {
+		recipeInfo, err := os.Stat(recipesRoot)
+		if err != nil {
+			gameOver("Invalid recipes directory: %v", err)
+		}
+		if !recipeInfo.IsDir() {
+			gameOver("Invalid recipes directory: %q is not a directory", recipesRoot)
+		}
+	}
+
+	if formsRoot != "" {
+		formInfo, err := os.Stat(formsRoot)
+		if err != nil {
+			gameOver("Invalid forms directory: %v", err)
+		}
+		if !formInfo.IsDir() {
+			gameOver("Invalid forms directory: %q is not a directory", formsRoot)
+		}
+	}
+
+	routeOptions := qinternal.DefaultRouteOptions()
+	state, err := loadDevRuntimeState(context.Background(), contentRoot, recipesRoot, formsRoot, opts, routeOptions)
+	if err != nil {
+		gameOver("%v", err)
+	}
+	defer closeModuleChains(context.Background(), state.recipeChains)
+
+	entries := buildRouteListEntries(state)
+	for _, entry := range entries {
+		fmt.Printf("%-4s %s  %s\n", entry.Method, entry.Path, entry.ContentType)
+	}
+}
+
+func buildRouteListEntries(state *devRuntimeState) []routeListEntry {
+	if state == nil {
+		return nil
+	}
+
+	canonicalRoutes := make(map[string]qinternal.ContentRoute, len(state.contentRoutes))
+	for requestPath := range state.contentRoutes {
+		canonicalPath, _ := qinternal.CanonicalRequestPath(requestPath, state.routeOptions)
+		if _, exists := canonicalRoutes[canonicalPath]; exists {
+			continue
+		}
+		route, ok := qinternal.ResolveContentRoute(state.contentRoutes, canonicalPath, state.routeOptions)
+		if !ok {
+			continue
+		}
+		canonicalRoutes[canonicalPath] = route
+	}
+
+	paths := make([]string, 0, len(canonicalRoutes))
+	for requestPath := range canonicalRoutes {
+		paths = append(paths, requestPath)
+	}
+	sort.Strings(paths)
+
+	entries := make([]routeListEntry, 0, len(paths)*2)
+	for _, requestPath := range paths {
+		route := canonicalRoutes[requestPath]
+		_, hasRecipes := state.recipeChains[route.SourceMIME]
+		contentType := devResponseContentType(route.SourceMIME, hasRecipes, contentData{encoding: dataEncodingRaw}, nil)
+		contentType = mediaTypeOnly(contentType)
+		entries = append(entries, routeListEntry{
+			Method:      http.MethodGet,
+			Path:        requestPath,
+			ContentType: contentType,
+		})
+		entries = append(entries, routeListEntry{
+			Method:      http.MethodHead,
+			Path:        requestPath,
+			ContentType: contentType,
+		})
+	}
+	return entries
+}
+
+func mediaTypeOnly(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "application/octet-stream"
+	}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err == nil && mediaType != "" {
+		return mediaType
+	}
+	if cut := strings.IndexByte(value, ';'); cut != -1 {
+		value = strings.TrimSpace(value[:cut])
+	}
+	if value == "" {
+		return "application/octet-stream"
+	}
+	return value
+}
+
 func routeCmd(args []string) {
 	if len(args) == 0 {
 		gameOver(usageRoute)
@@ -2023,6 +2168,9 @@ func routeCmd(args []string) {
 		return
 	case "head":
 		routePathCmd(args[1:], http.MethodHead, usageRouteHead, "route head")
+		return
+	case "list":
+		routeListCmd(args[1:])
 		return
 	case "warc":
 	default:
@@ -2297,7 +2445,7 @@ func normalizeDevArgs(args []string) []string {
 	return normalized
 }
 
-func normalizeRoutePathArgs(args []string) []string {
+func normalizeRouteArgs(args []string) []string {
 	if len(args) == 0 {
 		return args
 	}
