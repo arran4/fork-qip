@@ -136,6 +136,13 @@ Preview in dev mode:
 qip dev ./docs --recipes ./recipes -p 4000
 ```
 
+Resolve a single path through the same router pipeline:
+
+```bash
+qip route get ./docs /about --recipes ./recipes
+qip route head ./docs /about --recipes ./recipes
+```
+
 Build static output from the routed site (no intermediate `.warc` file on disk):
 
 ```bash
@@ -164,7 +171,6 @@ qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/col
 - [ ] Add digest pinning for remote modules (for example `https://...#sha256=<hex>`), and fail fast when fetched bytes do not match the pinned digest.
 - [ ] Update docs to encourage hard failure with traps instead of returning empty output which could lead to data loss.
 - [ ] Add `qip build static` for building static HTML web app from a directory of files.
-- [ ] Change `qip request` to `qip route get` and `qip route head`
 - [ ] Add `qip route list`
 - [ ] Add `qip serve` command that runs the server in `prod` mode by default.
 - [ ] Add `random_ptr` and `random_size` to modules that the host can detect and fill in with random data. It can choose to seed with determinism or use a cryptographic source of randomness — it’s up to the host.

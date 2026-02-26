@@ -89,14 +89,15 @@ type options struct {
 	mode    runtimeMode
 }
 
-const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  request  Resolve one path through the dev router and print its result\n  route    Archive routed output and export route artifacts\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
+const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  route    Resolve routed paths and export route artifacts\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
 const usageRun = "Usage: qip run [-v] [-i <input>] <wasm module URL or file>..."
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value ...] ..."
 const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
 const usageDev = "Usage: qip dev <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-p <port>] [-v|--verbose]"
-const usageRequest = "Usage: qip request <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-X <GET|HEAD>] [-v|--verbose]"
-const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  warc     Archive the routed site and write a minimal WARC file"
+const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  get      Resolve one GET path through the dev router and print the result\n  head     Resolve one HEAD path through the dev router and print headers\n  warc     Archive the routed site and write a minimal WARC file"
+const usageRouteGet = "Usage: qip route get <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
+const usageRouteHead = "Usage: qip route head <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-X <GET|HEAD>] [-o <warc file or ->] [-v|--verbose]"
 const usageForm = "Usage: qip form [-v|--verbose] <wasm module URL or file>"
 const usageHelp = "Usage: qip help [command]"
@@ -130,8 +131,6 @@ func main() {
 		complyCmd(args[1:])
 	} else if args[0] == "dev" {
 		devCmd(args[1:])
-	} else if args[0] == "request" {
-		requestCmd(args[1:])
 	} else if args[0] == "route" {
 		routeCmd(args[1:])
 	} else if args[0] == "form" {
@@ -159,10 +158,12 @@ func helpCmd(args []string) {
 		fmt.Println(helpComply)
 	case "dev":
 		fmt.Println(usageDev)
-	case "request":
-		fmt.Println(usageRequest)
 	case "route":
 		fmt.Println(usageRoute)
+		fmt.Println()
+		fmt.Println(usageRouteGet)
+		fmt.Println()
+		fmt.Println(usageRouteHead)
 		fmt.Println()
 		fmt.Println(usageRouteWarc)
 	case "form":
@@ -1896,42 +1897,35 @@ func devCmd(args []string) {
 	}
 }
 
-func requestCmd(args []string) {
+func routePathCmd(args []string, method string, usage string, logPrefix string) {
 	opts := options{}
 	var recipesRoot string
 	var formsRoot string
 	var modeRaw string
-	var methodRaw string
 
-	fs := flag.NewFlagSet("request", flag.ContinueOnError)
+	fs := flag.NewFlagSet("route "+strings.ToLower(method), flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var requestVerbose bool
-	fs.BoolVar(&requestVerbose, "v", false, "enable verbose logging")
-	fs.BoolVar(&requestVerbose, "verbose", false, "enable verbose logging")
+	var routeVerbose bool
+	fs.BoolVar(&routeVerbose, "v", false, "enable verbose logging")
+	fs.BoolVar(&routeVerbose, "verbose", false, "enable verbose logging")
 	fs.StringVar(&recipesRoot, "recipes", "", "recipe modules root directory")
 	fs.StringVar(&formsRoot, "forms", "", "form modules root directory")
 	fs.StringVar(&modeRaw, "mode", string(modeDev), "runtime mode: dev or prod")
-	fs.StringVar(&methodRaw, "X", http.MethodGet, "request method (GET or HEAD)")
-	fs.StringVar(&methodRaw, "method", http.MethodGet, "request method (GET or HEAD)")
-	if err := fs.Parse(normalizeRequestArgs(args)); err != nil {
-		gameOver("%s %v", usageRequest, err)
+	if err := fs.Parse(normalizeRoutePathArgs(args)); err != nil {
+		gameOver("%s %v", usage, err)
 	}
 
 	mode, err := parseRuntimeMode(modeRaw)
 	if err != nil {
 		gameOver("%v", err)
 	}
-	method, err := parseRequestMethod(methodRaw)
-	if err != nil {
-		gameOver("%v", err)
-	}
 
-	opts.verbose = requestVerbose
+	opts.verbose = routeVerbose
 	opts.mode = mode
 
 	rest := fs.Args()
 	if len(rest) != 2 {
-		gameOver(usageRequest)
+		gameOver("%s", usage)
 	}
 	contentRoot := rest[0]
 	requestPath := rest[1]
@@ -1983,26 +1977,26 @@ func requestCmd(args []string) {
 		}
 	}()
 
-	handler := newDevRequestHandler("request", &stateMu, &state, nil, routeOptions)
+	handler := newDevRequestHandler(logPrefix, &stateMu, &state, nil, routeOptions)
 	response, err := qinternal.ServeInProcessHTTP(handler, method, requestPath, nil)
 	if err != nil {
 		gameOver("%v", err)
 	}
 
 	if contentType := response.Header.Get("Content-Type"); contentType != "" {
-		log.Printf("request: Content-Type: %s", contentType)
+		log.Printf("%s: Content-Type: %s", logPrefix, contentType)
 	}
 	if etag := response.Header.Get("ETag"); etag != "" {
-		log.Printf("request: ETag: %s", etag)
+		log.Printf("%s: ETag: %s", logPrefix, etag)
 	}
 	if location := response.Header.Get("Location"); location != "" {
-		log.Printf("request: Location: %s", location)
+		log.Printf("%s: Location: %s", logPrefix, location)
 	}
 	contentLength := response.Header.Get("Content-Length")
 	if contentLength == "" {
 		contentLength = strconv.Itoa(len(response.Body))
 	}
-	log.Printf("request: Content-Length: %s", contentLength)
+	log.Printf("%s: Content-Length: %s", logPrefix, contentLength)
 
 	if method != http.MethodHead && len(response.Body) > 0 {
 		if _, err := os.Stdout.Write(response.Body); err != nil {
@@ -2020,6 +2014,21 @@ func requestCmd(args []string) {
 }
 
 func routeCmd(args []string) {
+	if len(args) == 0 {
+		gameOver(usageRoute)
+	}
+	switch args[0] {
+	case "get":
+		routePathCmd(args[1:], http.MethodGet, usageRouteGet, "route get")
+		return
+	case "head":
+		routePathCmd(args[1:], http.MethodHead, usageRouteHead, "route head")
+		return
+	case "warc":
+	default:
+		gameOver(usageRoute)
+	}
+
 	type routeRuntime struct {
 		state        *devRuntimeState
 		handler      http.Handler
@@ -2130,16 +2139,6 @@ func routeCmd(args []string) {
 		},
 	}); err != nil {
 		gameOver("%v", err)
-	}
-}
-
-func parseRequestMethod(raw string) (string, error) {
-	method := strings.ToUpper(strings.TrimSpace(raw))
-	switch method {
-	case http.MethodGet, http.MethodHead:
-		return method, nil
-	default:
-		return "", fmt.Errorf("invalid method %q (expected GET or HEAD)", raw)
 	}
 }
 
@@ -2298,7 +2297,7 @@ func normalizeDevArgs(args []string) []string {
 	return normalized
 }
 
-func normalizeRequestArgs(args []string) []string {
+func normalizeRoutePathArgs(args []string) []string {
 	if len(args) == 0 {
 		return args
 	}
@@ -2307,8 +2306,6 @@ func normalizeRequestArgs(args []string) []string {
 		"--recipes": {},
 		"--forms":   {},
 		"--mode":    {},
-		"-X":        {},
-		"--method":  {},
 	}
 
 	normalized := make([]string, 0, len(args))
