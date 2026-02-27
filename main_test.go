@@ -146,6 +146,46 @@ func TestNormalizeRouteArgs(t *testing.T) {
 	}
 }
 
+func TestParseModuleSpecs(t *testing.T) {
+	t.Run("associates uniform queries with prior module", func(t *testing.T) {
+		specs, err := parseModuleSpecs([]string{
+			"a.wasm",
+			"?alpha=1&beta=2",
+			"b.wasm",
+			"?gamma=3",
+			"?gamma=4",
+		}, "run")
+		if err != nil {
+			t.Fatalf("parseModuleSpecs error: %v", err)
+		}
+		if len(specs) != 2 {
+			t.Fatalf("len(specs)=%d, want 2", len(specs))
+		}
+		if specs[0].path != "a.wasm" {
+			t.Fatalf("specs[0].path=%q, want %q", specs[0].path, "a.wasm")
+		}
+		if specs[0].uniforms["alpha"] != "1" || specs[0].uniforms["beta"] != "2" {
+			t.Fatalf("unexpected uniforms for first module: %+v", specs[0].uniforms)
+		}
+		if specs[1].path != "b.wasm" {
+			t.Fatalf("specs[1].path=%q, want %q", specs[1].path, "b.wasm")
+		}
+		if specs[1].uniforms["gamma"] != "4" {
+			t.Fatalf("specs[1].uniforms[gamma]=%q, want %q", specs[1].uniforms["gamma"], "4")
+		}
+	})
+
+	t.Run("rejects uniform query before module path", func(t *testing.T) {
+		_, err := parseModuleSpecs([]string{"?x=1"}, "run")
+		if err == nil {
+			t.Fatal("expected parse error")
+		}
+		if !strings.Contains(err.Error(), "run uniform query") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestBuildRouteListEntries(t *testing.T) {
 	state := &devRuntimeState{
 		contentRoutes: map[string]qinternal.ContentRoute{
@@ -202,6 +242,91 @@ func TestRunDelayedStdinDoesNotFailExportResolution(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "link: X") {
 		t.Fatalf("unexpected output: %q", stdout.String())
+	}
+}
+
+func TestRunAppliesUniformQueries(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "in.txt")
+	if err := os.WriteFile(inputPath, []byte("line1\nline2\nline3"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	runOnce := func(extraArgs ...string) []byte {
+		args := []string{"-test.run=TestHelperRunModuleCLI", "--", "-i", inputPath, "examples/text-to-bmp.wasm"}
+		args = append(args, extraArgs...)
+		cmd := exec.Command(os.Args[0], args...)
+		cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("run failed: %v\nstderr: %s", err, stderr.String())
+		}
+		return stdout.Bytes()
+	}
+
+	base := runOnce()
+	withUniform := runOnce("?leading=40")
+
+	baseW, baseH, err := qinternal.GetBMPDimensions(base)
+	if err != nil {
+		t.Fatalf("base output is not bmp: %v", err)
+	}
+	withUniformW, withUniformH, err := qinternal.GetBMPDimensions(withUniform)
+	if err != nil {
+		t.Fatalf("uniform output is not bmp: %v", err)
+	}
+
+	if baseW != withUniformW {
+		t.Fatalf("width changed unexpectedly: base=%d uniform=%d", baseW, withUniformW)
+	}
+	if baseH == withUniformH {
+		t.Fatalf("expected height to change with uniform; base=%d uniform=%d", baseH, withUniformH)
+	}
+}
+
+func TestRunAppliesColsUniform(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "in.txt")
+	if err := os.WriteFile(inputPath, []byte("abcdefghij"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	runOnce := func(extraArgs ...string) []byte {
+		args := []string{"-test.run=TestHelperRunModuleCLI", "--", "-i", inputPath, "examples/text-to-bmp.wasm"}
+		args = append(args, extraArgs...)
+		cmd := exec.Command(os.Args[0], args...)
+		cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("run failed: %v\nstderr: %s", err, stderr.String())
+		}
+		return stdout.Bytes()
+	}
+
+	base := runOnce()
+	withUniform := runOnce("?cols=10")
+
+	baseW, baseH, err := qinternal.GetBMPDimensions(base)
+	if err != nil {
+		t.Fatalf("base output is not bmp: %v", err)
+	}
+	withUniformW, withUniformH, err := qinternal.GetBMPDimensions(withUniform)
+	if err != nil {
+		t.Fatalf("uniform output is not bmp: %v", err)
+	}
+
+	if baseW == withUniformW {
+		t.Fatalf("expected width to change with uniform; base=%d uniform=%d", baseW, withUniformW)
+	}
+	if withUniformW != 80 {
+		t.Fatalf("uniform width=%d, want %d", withUniformW, 80)
+	}
+	if withUniformH < baseH {
+		t.Fatalf("height unexpectedly decreased: base=%d uniform=%d", baseH, withUniformH)
 	}
 }
 
@@ -378,12 +503,12 @@ func TestLoadRecipeChainsRejectsDuplicatePrefix(t *testing.T) {
 
 func TestParseImageModuleSpecs(t *testing.T) {
 	t.Run("module with query", func(t *testing.T) {
-		specs, err := parseImageModuleSpecs([]string{
+		specs, err := parseModuleSpecs([]string{
 			"examples/rgba/color-halftone.wasm",
 			"?max_radius=2.0",
 			"examples/rgba/brightness.wasm",
 			"?brightness=0.2",
-		})
+		}, "image")
 		if err != nil {
 			t.Fatalf("parseImageModuleSpecs error: %v", err)
 		}
@@ -405,13 +530,13 @@ func TestParseImageModuleSpecs(t *testing.T) {
 	})
 
 	t.Run("query before module is error", func(t *testing.T) {
-		if _, err := parseImageModuleSpecs([]string{"?max_radius=2.0"}); err == nil {
+		if _, err := parseModuleSpecs([]string{"?max_radius=2.0"}, "image"); err == nil {
 			t.Fatal("expected error for query before module")
 		}
 	})
 
 	t.Run("empty query is error", func(t *testing.T) {
-		if _, err := parseImageModuleSpecs([]string{"examples/rgba/brightness.wasm", "?"}); err == nil {
+		if _, err := parseModuleSpecs([]string{"examples/rgba/brightness.wasm", "?"}, "image"); err == nil {
 			t.Fatal("expected error for empty query")
 		}
 	})

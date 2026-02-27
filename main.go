@@ -68,7 +68,7 @@ type tileStage struct {
 	tileSpan    int
 }
 
-type imageModuleSpec struct {
+type moduleSpec struct {
 	path     string
 	uniforms map[string]string
 }
@@ -91,7 +91,7 @@ type options struct {
 }
 
 const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  route    Resolve routed paths and export route artifacts\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
-const usageRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file>..."
+const usageRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file> [?key=value ...] ..."
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value ...] ..."
 const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
@@ -100,14 +100,14 @@ const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  get 
 const usageRouteGet = "Usage: qip route get <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteHead = "Usage: qip route head <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteList = "Usage: qip route list <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
-const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-X <GET|HEAD>] [-o <warc file or ->] [-v|--verbose]"
+const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [--host <host>] [-X <GET|HEAD>] [-o <warc file or ->] [-v|--verbose]"
 const usageForm = "Usage: qip form [-v|--verbose] <wasm module URL or file>"
 const usageHelp = "Usage: qip help [command]"
 
 var qipFormTagPattern = regexp.MustCompile(`(?is)<qip-form\b[^>]*>`)
 var qipFormNamePattern = regexp.MustCompile("(?is)\\bname\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))")
 
-const helpRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file>...\n\nModule contracts:\n  Run mode:\n    - Exports run(input_size), input_ptr, and input_utf8_cap or input_bytes_cap\n    - Exports output_ptr and output_utf8_cap or output_bytes_cap or output_i32_cap\n  Image mode:\n    - Exports tile_rgba_f32_64x64, input_ptr, input_bytes_cap\n    - Optional: uniform_set_width_and_height, calculate_halo_px\n\nComposition:\n  If a module exports tile_rgba_f32_64x64, qip run composes a contiguous image stage block.\n  Input to that block must be BMP bytes and the block outputs BMP bytes.\n  Run stages may follow and will receive BMP bytes.\n\nExample:\n  echo '<svg width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#d52b1e\" /><rect x=\"13\" y=\"6\" width=\"6\" height=\"20\" fill=\"#ffffff\" /><rect x=\"6\" y=\"13\" width=\"20\" height=\"6\" fill=\"#ffffff\" /></svg>' | ./qip run examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > out.ico"
+const helpRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file> [?key=value ...] ...\n\nModule contracts:\n  Run mode:\n    - Exports run(input_size), input_ptr, and input_utf8_cap or input_bytes_cap\n    - Exports output_ptr and output_utf8_cap or output_bytes_cap or output_i32_cap\n    - Optional uniforms: uniform_set_<key>(value)\n  Image mode:\n    - Exports tile_rgba_f32_64x64, input_ptr, input_bytes_cap\n    - Optional: uniform_set_width_and_height, calculate_halo_px\n\nUniform args:\n  Place ?key=value after a module path to set that module's uniforms.\n  Example: examples/text-to-bmp.wasm ?leading=24\n\nComposition:\n  If a module exports tile_rgba_f32_64x64, qip run composes a contiguous image stage block.\n  Input to that block must be BMP bytes and the block outputs BMP bytes.\n  Run stages may follow and will receive BMP bytes.\n\nExample:\n  echo '<svg width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#d52b1e\" /><rect x=\"13\" y=\"6\" width=\"6\" height=\"20\" fill=\"#ffffff\" /><rect x=\"6\" y=\"13\" width=\"20\" height=\"6\" fill=\"#ffffff\" /></svg>' | ./qip run examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > out.ico"
 const helpComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]\n\nBase validation (always run):\n  - Requires export memory\n  - Detects module kind: run, tile, or run+tile\n\n--with check modules:\n  - qip instantiates the implementation as module name \"impl\"\n  - each check module must import impl.memory\n  - each check module must export positive() -> i32\n  - optional: export negative() -> i32\n  - qip runs positive() first\n  - if negative() exists, qip runs it on a fresh impl instance and also provides host import qip.run_must_trap(i32) -> i32\n  - status > 0 passes, status <= 0 fails\n  - checks run in parallel; all must pass\n\nWAT shape (minimal):\n  (import \"impl\" \"memory\" (memory 1))\n  (import \"impl\" \"run\" (func $run (param i32) (result i32)))\n  (func (export \"positive\") (result i32)\n    i32.const 1)\n\nFailure behavior:\n  - if impl traps during positive(), that check fails immediately\n  - for negative(), call qip.run_must_trap(...) when trap is the expected outcome\n  - qip reports failing check path and any optional failure detail exports"
 
 func main() {
@@ -235,8 +235,11 @@ func runCmd(args []string) {
 	}
 	opts.verbose = opts.verbose || runVerbose
 
-	modules := fs.Args()
-	if len(modules) < 1 {
+	moduleSpecs, parseErr := parseModuleSpecs(fs.Args(), "run")
+	if parseErr != nil {
+		gameOver("Invalid run module args: %v", parseErr)
+	}
+	if len(moduleSpecs) == 0 {
 		gameOver(usageRun)
 	}
 	if timeoutMS <= 0 {
@@ -283,7 +286,7 @@ func runCmd(args []string) {
 		}
 	}()
 
-	pipeline, err := buildPipeline(context.Background(), modules, opts)
+	pipeline, err := buildPipelineFromSpecs(context.Background(), moduleSpecs, opts)
 	if err != nil {
 		gameOver("%v", err)
 	}
@@ -611,7 +614,7 @@ func runBenchSample(
 	}
 	defer cancel()
 
-	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName)
+	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName, nil)
 	if err != nil {
 		return benchSample{}, contentData{}, err
 	}
@@ -833,37 +836,37 @@ func printBenchBenchmarkReport(index int, modulePath string, binarySize uint64, 
 	fmt.Printf("\n")
 }
 
-func parseImageModuleSpecs(args []string) ([]imageModuleSpec, error) {
-	specs := make([]imageModuleSpec, 0, len(args))
+func parseModuleSpecs(args []string, commandName string) ([]moduleSpec, error) {
+	specs := make([]moduleSpec, 0, len(args))
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "?") {
 			if len(specs) == 0 {
-				return nil, fmt.Errorf("image uniform query %q must follow a wasm module path", arg)
+				return nil, fmt.Errorf("%s uniform query %q must follow a wasm module path", commandName, arg)
 			}
 			if len(arg) == 1 {
-				return nil, errors.New("image uniform query must not be empty")
+				return nil, fmt.Errorf("%s uniform query must not be empty", commandName)
 			}
 			values, err := url.ParseQuery(arg[1:])
 			if err != nil {
-				return nil, fmt.Errorf("invalid image uniform query %q: %w", arg, err)
+				return nil, fmt.Errorf("invalid %s uniform query %q: %w", commandName, arg, err)
 			}
 			if len(values) == 0 {
-				return nil, fmt.Errorf("image uniform query %q must contain key=value pairs", arg)
+				return nil, fmt.Errorf("%s uniform query %q must contain key=value pairs", commandName, arg)
 			}
 			last := &specs[len(specs)-1]
 			for key, vals := range values {
 				if key == "" {
-					return nil, fmt.Errorf("invalid image uniform query %q: empty key", arg)
+					return nil, fmt.Errorf("invalid %s uniform query %q: empty key", commandName, arg)
 				}
 				if len(vals) == 0 {
-					return nil, fmt.Errorf("invalid image uniform query %q: missing value for %q", arg, key)
+					return nil, fmt.Errorf("invalid %s uniform query %q: missing value for %q", commandName, arg, key)
 				}
 				last.uniforms[key] = vals[len(vals)-1]
 			}
 			continue
 		}
 
-		specs = append(specs, imageModuleSpec{
+		specs = append(specs, moduleSpec{
 			path:     arg,
 			uniforms: make(map[string]string),
 		})
@@ -1297,7 +1300,7 @@ func runTileStagesCompiled(ctx context.Context, runtime wazero.Runtime, compiled
 	return outputRGBA, instDurations, stageDurations, nil
 }
 
-func applyImageUniforms(ctx context.Context, mod api.Module, uniforms map[string]string) error {
+func applyModuleUniforms(ctx context.Context, mod api.Module, uniforms map[string]string) error {
 	if len(uniforms) == 0 {
 		return nil
 	}
@@ -1502,7 +1505,7 @@ func imageCmd(args []string) {
 		gameOver("%s %v", usageImage, err)
 	}
 	opts.verbose = opts.verbose || imageVerbose
-	moduleSpecs, parseErr := parseImageModuleSpecs(fs.Args())
+	moduleSpecs, parseErr := parseModuleSpecs(fs.Args(), "image")
 	if parseErr != nil {
 		gameOver("Invalid image module args: %v", parseErr)
 	}
@@ -1574,7 +1577,7 @@ func imageCmd(args []string) {
 		if err != nil {
 			gameOver("Wasm module could not be compiled")
 		}
-		if err := applyImageUniforms(execCtx, mod, moduleSpecs[i].uniforms); err != nil {
+		if err := applyModuleUniforms(execCtx, mod, moduleSpecs[i].uniforms); err != nil {
 			gameOver("%v", err)
 		}
 		stage, err := loadTileStage(execCtx, mod)
@@ -1635,14 +1638,14 @@ type moduleExecutionResult struct {
 }
 
 func runModuleWithInput(ctx context.Context, runtime wazero.Runtime, compiled wazero.CompiledModule, inputBytes []byte, opts options, moduleName string) (output contentData, instantiation time.Duration, returnErr error) {
-	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName)
+	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName, nil)
 	if err != nil {
 		return contentData{}, 0, err
 	}
 	return exec.output, exec.instantiation, nil
 }
 
-func executeModuleWithInput(ctx context.Context, runtime wazero.Runtime, compiled wazero.CompiledModule, inputBytes []byte, opts options, moduleName string) (exec moduleExecutionResult, returnErr error) {
+func executeModuleWithInput(ctx context.Context, runtime wazero.Runtime, compiled wazero.CompiledModule, inputBytes []byte, opts options, moduleName string, uniforms map[string]string) (exec moduleExecutionResult, returnErr error) {
 	totalStart := time.Now()
 	defer func() {
 		exec.total = time.Since(totalStart)
@@ -1656,6 +1659,11 @@ func executeModuleWithInput(ctx context.Context, runtime wazero.Runtime, compile
 	}
 	defer mod.Close(ctx)
 	exec.instantiation = time.Since(instStart)
+
+	if err := applyModuleUniforms(ctx, mod, uniforms); err != nil {
+		returnErr = err
+		return
+	}
 
 	var input contentData
 	// Get input_ptr and input_cap (required)
@@ -3243,18 +3251,30 @@ const (
 )
 
 func buildPipeline(ctx context.Context, modules []string, opts options) (*qinternal.Pipeline, error) {
-	if len(modules) == 0 {
+	specs := make([]moduleSpec, len(modules))
+	for i, modulePath := range modules {
+		specs[i] = moduleSpec{
+			path:     modulePath,
+			uniforms: make(map[string]string),
+		}
+	}
+	return buildPipelineFromSpecs(ctx, specs, opts)
+}
+
+func buildPipelineFromSpecs(ctx context.Context, specs []moduleSpec, opts options) (*qinternal.Pipeline, error) {
+	if len(specs) == 0 {
 		return &qinternal.Pipeline{}, nil
 	}
 
 	runtime := wasmruntime.New(ctx)
 
 	type moduleInfo struct {
-		path string
-		cm   wazero.CompiledModule
-		kind stageKind
+		path     string
+		cm       wazero.CompiledModule
+		kind     stageKind
+		uniforms map[string]string
 	}
-	infos := make([]moduleInfo, len(modules))
+	infos := make([]moduleInfo, len(specs))
 
 	var stages []qinternal.Stage
 	cleanup := func() {
@@ -3269,8 +3289,8 @@ func buildPipeline(ctx context.Context, modules []string, opts options) (*qinter
 		_ = runtime.Close(ctx)
 	}
 
-	for i, modulePath := range modules {
-		body, err := readModulePath(modulePath, opts)
+	for i, spec := range specs {
+		body, err := readModulePath(spec.path, opts)
 		if err != nil {
 			cleanup()
 			return nil, err
@@ -3278,14 +3298,14 @@ func buildPipeline(ctx context.Context, modules []string, opts options) (*qinter
 		cm, err := runtime.CompileModule(ctx, body)
 		if err != nil {
 			cleanup()
-			return nil, fmt.Errorf("wasm module %q could not be compiled: %w", modulePath, err)
+			return nil, fmt.Errorf("wasm module %q could not be compiled: %w", spec.path, err)
 		}
 
 		kind := stageKindRun
 		if _, ok := cm.ExportedFunctions()["tile_rgba_f32_64x64"]; ok {
 			kind = stageKindTile
 		}
-		infos[i] = moduleInfo{path: modulePath, cm: cm, kind: kind}
+		infos[i] = moduleInfo{path: spec.path, cm: cm, kind: kind, uniforms: spec.uniforms}
 	}
 
 	for i := 0; i < len(infos); {
@@ -3296,6 +3316,7 @@ func buildPipeline(ctx context.Context, modules []string, opts options) (*qinter
 				compiled: info.cm,
 				name:     fmt.Sprintf("stage-%d", i),
 				opts:     opts,
+				uniforms: info.uniforms,
 			}
 			stages = append(stages, &qinternal.RunStage{Driver: driver})
 			i++
@@ -3307,6 +3328,7 @@ func buildPipeline(ctx context.Context, modules []string, opts options) (*qinter
 					runtime:  runtime,
 					compiled: infos[i].cm,
 					name:     fmt.Sprintf("tile-%d", i),
+					uniforms: infos[i].uniforms,
 				}
 				// Pre-instantiate to get halo
 				if err := driver.init(ctx); err != nil {
@@ -3333,6 +3355,7 @@ type wasmRunDriver struct {
 	compiled wazero.CompiledModule
 	name     string
 	opts     options
+	uniforms map[string]string
 }
 
 func (d *wasmRunDriver) Execute(ctx context.Context, input qinternal.Content, requestID uint64) (qinternal.Content, error) {
@@ -3346,7 +3369,7 @@ func (d *wasmRunDriver) Execute(ctx context.Context, input qinternal.Content, re
 	}
 
 	// Implementation of executeModuleWithInput logic adapted to Content
-	exec, err := executeModuleWithInput(ctx, d.runtime, d.compiled, inputBytes, d.opts, d.name)
+	exec, err := executeModuleWithInput(ctx, d.runtime, d.compiled, inputBytes, d.opts, d.name, d.uniforms)
 	if err != nil {
 		return nil, err
 	}
@@ -3373,6 +3396,7 @@ type wasmTileModuleDriver struct {
 	runtime  wazero.Runtime
 	compiled wazero.CompiledModule
 	name     string
+	uniforms map[string]string
 
 	mod         api.Module
 	tileFunc    api.Function
@@ -3391,6 +3415,11 @@ func (d *wasmTileModuleDriver) init(ctx context.Context) error {
 
 	stage, err := loadTileStage(ctx, mod)
 	if err != nil {
+		mod.Close(ctx)
+		return err
+	}
+
+	if err := applyModuleUniforms(ctx, mod, d.uniforms); err != nil {
 		mod.Close(ctx)
 		return err
 	}
