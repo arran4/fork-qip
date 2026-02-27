@@ -5,11 +5,14 @@
 #define OUTPUT_CAP (8 * 1024 * 1024)
 #define GLYPH_W 8
 #define GLYPH_H 8
-#define COLS 80
+#define DEFAULT_COLS 80
+#define MIN_COLS 1
+#define MAX_COLS 512
 
 static unsigned char input_buffer[INPUT_CAP];
 static unsigned char output_buffer[OUTPUT_CAP];
 static int32_t leading_px = 4;
+static int32_t cols = DEFAULT_COLS;
 
 __attribute__((export_name("input_ptr")))
 uint32_t input_ptr() {
@@ -41,6 +44,18 @@ int32_t uniform_set_leading(int32_t value) {
     }
     leading_px = value;
     return leading_px;
+}
+
+__attribute__((export_name("uniform_set_cols")))
+int32_t uniform_set_cols(int32_t value) {
+    if (value < MIN_COLS) {
+        value = MIN_COLS;
+    }
+    if (value > MAX_COLS) {
+        value = MAX_COLS;
+    }
+    cols = value;
+    return cols;
 }
 
 static void write_u16_le(uint32_t off, uint16_t value) {
@@ -224,7 +239,7 @@ static uint32_t count_rows(uint32_t input_size) {
         if (c == '\t') {
             uint32_t spaces = 4 - (col % 4);
             col += spaces;
-            while (col >= COLS) {
+            while (col >= (uint32_t)cols) {
                 rows++;
                 col = 0;
             }
@@ -232,7 +247,7 @@ static uint32_t count_rows(uint32_t input_size) {
             continue;
         }
         col++;
-        if (col >= COLS) {
+        if (col >= (uint32_t)cols) {
             rows++;
             col = 0;
         }
@@ -249,7 +264,7 @@ uint32_t run(uint32_t input_size) {
 
     uint32_t rows = count_rows(input_size);
     uint32_t row_h = GLYPH_H + (uint32_t)leading_px;
-    uint32_t width = COLS * GLYPH_W;
+    uint32_t width = (uint32_t)cols * GLYPH_W;
     uint32_t height = rows * row_h;
     uint64_t pixel_bytes = (uint64_t)width * (uint64_t)height * 4u;
     uint64_t total = 54u + pixel_bytes;
@@ -304,7 +319,7 @@ uint32_t run(uint32_t input_size) {
             uint32_t spaces = 4 - (col % 4);
             for (uint32_t s = 0; s < spaces; s++) {
                 col++;
-                if (col >= COLS) {
+                if (col >= (uint32_t)cols) {
                     row++;
                     col = 0;
                     if (row >= rows) break;
@@ -331,7 +346,7 @@ uint32_t run(uint32_t input_size) {
         }
 
         col++;
-        if (col >= COLS) {
+        if (col >= (uint32_t)cols) {
             row++;
             col = 0;
         }
