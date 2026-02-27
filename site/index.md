@@ -10,6 +10,12 @@ I like to think of `qip` as “React components but for everything (and that run
 
 Planned host integrations include Swift, React, and Elixir, pushing further toward write once, run anywhere.
 
+## Install
+
+```sh
+go install github.com/royalicing/qip@latest
+```
+
 ## The problems with software today
 
 Software today is like Matryoshka dolls, frameworks that depend on libraries that depend on libraries that depend on OS libs and so on. This can be incredibly productive for building, but has lead to increasingly complex and bloated end-user apps.
