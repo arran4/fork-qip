@@ -101,6 +101,56 @@ func TestContentRequestPaths(t *testing.T) {
 	}
 }
 
+func TestContentRequestPathsWithSymlinks(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+
+	mustWrite := func(base string, rel string, data []byte) {
+		full := filepath.Join(base, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, data, 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	mustWrite(external, "docs/index.html", []byte("<h1>Docs</h1>"))
+	mustWrite(external, "docs/guide.md", []byte("Guide"))
+	mustWrite(external, "shared.txt", []byte("Shared"))
+
+	if err := os.Symlink(filepath.Join(external, "docs"), filepath.Join(root, "docs")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(external, "shared.txt"), filepath.Join(root, "shared.txt")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	routes, err := qinternal.BuildContentRoutes(root, qinternal.DefaultRouteOptions())
+	if err != nil {
+		t.Fatalf("BuildContentRoutes: %v", err)
+	}
+
+	checks := map[string]string{
+		"/docs/index.html": "docs/index.html",
+		"/docs":            "docs/index.html",
+		"/docs/":           "docs/index.html",
+		"/docs/guide.md":   "docs/guide.md",
+		"/docs/guide":      "docs/guide.md",
+		"/shared.txt":      "shared.txt",
+	}
+	for requestPath, wantRel := range checks {
+		route, ok := routes[requestPath]
+		if !ok {
+			t.Fatalf("missing route for %s", requestPath)
+		}
+		wantFull := filepath.Join(root, filepath.FromSlash(wantRel))
+		if route.FilePath != wantFull {
+			t.Fatalf("route %s file=%s, want %s", requestPath, route.FilePath, wantFull)
+		}
+	}
+}
+
 func TestResolveDevContentRoute(t *testing.T) {
 	routes := map[string]qinternal.ContentRoute{
 		"/docs":  {FilePath: "docs/index.md", SourceMIME: "text/markdown"},

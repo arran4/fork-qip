@@ -4,6 +4,8 @@ const INPUT_CAP: u32 = 0x40000;
 const OUTPUT_CAP: u32 = 0x80000;
 const TITLE_CAP: usize = 1024;
 const EMBEDDED_STYLES = std.mem.trimRight(u8, @embedFile("styles.css"), "\r\n");
+const EMBEDDED_HEADER = std.mem.trimRight(u8, @embedFile("header.html"), "\r\n");
+const EMBEDDED_FOOTER = std.mem.trimRight(u8, @embedFile("footer.html"), "\r\n");
 
 comptime {
     if (containsClosingStyleTag(EMBEDDED_STYLES)) {
@@ -137,9 +139,12 @@ fn wrapHtml(input: []const u8, output: []u8, title_buf: []u8) usize {
     w.writeEscaped(title);
     w.writeSlice("</title><style>");
     w.writeSlice(EMBEDDED_STYLES);
-    w.writeSlice("</style></head><body><main>");
+    w.writeSlice("</style></head>");
+    w.writeSlice(EMBEDDED_HEADER);
+    w.writeSlice("<main>");
     w.writeSlice(input);
-    w.writeSlice("</main></body></html>");
+    w.writeSlice("</main>");
+    w.writeSlice(EMBEDDED_FOOTER);
     w.writeByte('\n');
 
     return w.idx;

@@ -64,7 +64,3 @@ Good tools should be:
 - cheap to replace
 - work on the web, on native, and the command line
 - runnable by agents and by users
-
----
-
-- [How qip Works](./how-it-works)

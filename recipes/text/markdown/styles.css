@@ -1,16 +1,49 @@
 :root {
-  --text: #0f1115;
-  --bg: #e6e6e6;
-  --link: #0051dc;
+  --dark: 0;
+  --invert: 0;
+
+  --text-light: #0f1115;
+  --text-dark: #e6e6e6;
+  --bg-light: #e6e6e6;
+  --bg-dark: #0f1115;
+  --link-light: #0051dc;
+  --link-dark: #8ab4ff;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1115;
-    --text: #e6e6e6;
-    --link: #8ab4ff;
+    --dark: 1;
   }
 }
 
+:root,
+header,
+footer,
+section {
+  --light-dark-ratio: calc(
+    var(--dark) * (1 - var(--invert)) + (1 - var(--dark)) * var(--invert)
+  );
+
+  --text: color-mix(
+    in srgb,
+    var(--text-light) calc((1 - var(--light-dark-ratio)) * 100%),
+    var(--text-dark) calc(var(--light-dark-ratio) * 100%)
+  );
+  --bg: color-mix(
+    in srgb,
+    var(--bg-light) calc((1 - var(--light-dark-ratio)) * 100%),
+    var(--bg-dark) calc(var(--light-dark-ratio) * 100%)
+  );
+  --link: color-mix(
+    in srgb,
+    var(--link-light) calc((1 - var(--light-dark-ratio)) * 100%),
+    var(--link-dark) calc(var(--light-dark-ratio) * 100%)
+  );
+}
+
+* {
+  margin: 0;
+  padding: 0;
+}
 body {
   color: var(--text);
   background: var(--bg);
@@ -20,6 +53,24 @@ body {
 a {
   color: var(--link);
 }
+
+header[role="banner"],
+footer[role="contentinfo"] {
+  --invert: 1;
+  background: var(--bg);
+
+  nav {
+    padding: 1lh 0;
+  }
+
+  ul {
+    list-style: none;
+    display: flex;
+    gap: 2em;
+    justify-content: center;
+  }
+}
+
 main {
   max-width: 44em;
   margin: 0 auto;

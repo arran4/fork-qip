@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -242,40 +243,91 @@ func BuildContentRoutes(contentRoot string, options RouteOptions) (map[string]Co
 		rel  string
 		full string
 	}, 0, 32)
-	err := filepath.WalkDir(contentRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !d.Type().IsRegular() {
-			return fmt.Errorf("content entry %q must be a regular file", fullPath)
-		}
-		relPath, err := filepath.Rel(contentRoot, fullPath)
+	rootInfo, err := os.Stat(contentRoot)
+	if err != nil {
+		return nil, err
+	}
+	if !rootInfo.IsDir() {
+		return nil, fmt.Errorf("content root %q must be a directory", contentRoot)
+	}
+
+	seenDirs := make(map[string]uint8)
+	var walkDir func(readDir string, relDir string) error
+	walkDir = func(readDir string, relDir string) error {
+		realDir, err := filepath.EvalSymlinks(readDir)
 		if err != nil {
 			return err
 		}
-		relPath = filepath.ToSlash(relPath)
-		if !utf8.ValidString(relPath) {
-			return fmt.Errorf("content path %q must be valid UTF-8", relPath)
+		realDir, err = filepath.Abs(realDir)
+		if err != nil {
+			return err
 		}
-		if strings.Contains(relPath, "\\") {
-			return fmt.Errorf("content path %q must not contain backslash", relPath)
+		realDir = filepath.Clean(realDir)
+		if seenDirs[realDir] > 0 {
+			// Avoid infinite recursion on symlink cycles in the current branch.
+			return nil
 		}
-		if strings.HasPrefix(relPath, "/") {
-			return fmt.Errorf("content path %q must not start with /", relPath)
+		seenDirs[realDir]++
+		defer func() {
+			seenDirs[realDir]--
+		}()
+
+		entries, err := os.ReadDir(readDir)
+		if err != nil {
+			return err
 		}
-		cleanRel := path.Clean(relPath)
-		if cleanRel != relPath || cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, "../") {
-			return fmt.Errorf("content path %q is not canonical", relPath)
+		for _, entry := range entries {
+			name := entry.Name()
+			relPath := name
+			if relDir != "" {
+				relPath = path.Join(relDir, name)
+			}
+			if err := validateContentRelPath(relPath); err != nil {
+				return err
+			}
+
+			fullPath := filepath.Join(readDir, name)
+			mode := entry.Type()
+			if mode.IsRegular() {
+				files = append(files, struct {
+					rel  string
+					full string
+				}{rel: relPath, full: fullPath})
+				continue
+			}
+			if mode.IsDir() {
+				if err := walkDir(fullPath, relPath); err != nil {
+					return err
+				}
+				continue
+			}
+			if mode&fs.ModeSymlink == 0 {
+				return fmt.Errorf("content entry %q must be a regular file", fullPath)
+			}
+
+			targetInfo, err := os.Stat(fullPath)
+			if err != nil {
+				return err
+			}
+			if targetInfo.Mode().IsRegular() {
+				files = append(files, struct {
+					rel  string
+					full string
+				}{rel: relPath, full: fullPath})
+				continue
+			}
+			if targetInfo.IsDir() {
+				if err := walkDir(fullPath, relPath); err != nil {
+					return err
+				}
+				continue
+			}
+			return fmt.Errorf("content entry %q must be a regular file", fullPath)
 		}
-		files = append(files, struct {
-			rel  string
-			full string
-		}{rel: relPath, full: fullPath})
 		return nil
-	})
+	}
+
+	err = walkDir(contentRoot, "")
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +352,23 @@ func BuildContentRoutes(contentRoot string, options RouteOptions) (map[string]Co
 	}
 
 	return routes, nil
+}
+
+func validateContentRelPath(relPath string) error {
+	if !utf8.ValidString(relPath) {
+		return fmt.Errorf("content path %q must be valid UTF-8", relPath)
+	}
+	if strings.Contains(relPath, "\\") {
+		return fmt.Errorf("content path %q must not contain backslash", relPath)
+	}
+	if strings.HasPrefix(relPath, "/") {
+		return fmt.Errorf("content path %q must not start with /", relPath)
+	}
+	cleanRel := path.Clean(relPath)
+	if cleanRel != relPath || cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, "../") {
+		return fmt.Errorf("content path %q is not canonical", relPath)
+	}
+	return nil
 }
 
 func ResolveContentRoute(routes map[string]ContentRoute, requestPath string, options RouteOptions) (ContentRoute, bool) {
