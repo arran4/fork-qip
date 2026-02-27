@@ -33,6 +33,38 @@ Required function:
 
 If `output_ptr` + output cap are not exported, `qip` falls back to printing `Ran: <run_return_value>`.
 
+## WebAssembly Module Contract
+
+### `input_utf8_cap` / `input_bytes_cap`
+
+Use `input_utf8_cap` for UTF-8 text input and `input_bytes_cap` for binary input.
+
+### `output_utf8_cap` / `output_bytes_cap` / `output_i32_cap`
+
+Use `output_utf8_cap` for UTF-8 text output, `output_bytes_cap` for binary output, and `output_i32_cap` for `i32[]` output.
+
+If output exports are omitted, the return value of `run` is used as the result.
+
+If output exports are present, the return value of `run` is used as the output size.
+
+### Optional Content Type Metadata
+
+Run modules may optionally export content type metadata for friendlier composition and host `Content-Type` selection.
+
+- `input_content_type_ptr` / `input_content_type_size`
+- `output_content_type_ptr` / `output_content_type_size`
+
+Rules:
+
+- These exports are optional. Omit them when content type is unknown or intentionally generic.
+- Export exactly one MIME type value when present.
+- Do not use media ranges (for example, `text/*` or `*/*`).
+- Do not use comma-separated MIME lists.
+- Omit input content type for modules that accept any UTF-8 text regardless of media type (for example: plain text, HTML, XML).
+- Omit output content type for generic raw bytes and `i32[]` outputs unless the module guarantees a specific media type.
+- Export content type when the module knows it exactly (for example: `text/javascript`, `text/html`, `image/bmp`).
+- Export only the media type value. Do not append `charset=utf-8`; UTF-8 is already implied by `input_utf8_cap` / `output_utf8_cap`.
+
 ## Input/Output Semantics
 
 Input:

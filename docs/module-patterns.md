@@ -193,6 +193,6 @@ Prefer soft failure when:
 
 - Pick one pattern first; do not mix semantics accidentally.
 - Keep pointer/cap units consistent (bytes vs `i32` items).
-- Clamp input length in module code.
+- Validate input length and trap on overflow.
 - Ensure `run` return value unit matches exported output cap type.
 - Add tests for malformed input and oversized input.

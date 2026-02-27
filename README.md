@@ -422,17 +422,9 @@ The contract looks like:
 
 ## WebAssembly module contract
 
-### `input_utf8_cap` / `input_bytes_cap`
+The run-module contract (caps, output semantics, and optional content type metadata) is documented in:
 
-Use `input_utf8_cap` for UTF-8 text input and `input_bytes_cap` for binary input.
-
-### `output_utf8_cap` / `output_bytes_cap`
-
-Use `output_utf8_cap` for UTF-8 text output and `output_bytes_cap` for binary output.
-
-If omitted, then the return value of `run` is used as the result.
-
-If exported, then the return value of `run` is used as the size of the output.
+- [`docs/module-memory.md`](./docs/module-memory.md#webassembly-module-contract)
 
 ## Building the site
 
