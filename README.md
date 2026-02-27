@@ -182,8 +182,8 @@ qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/col
 
 ## Documentation
 
-- [Comply Command](docs/comply.md)
 - [Module Contract Guide](docs/module-contract.md)
+- [Comply Command](docs/comply.md)
 - [Module Patterns (including error semantics)](docs/module-patterns.md)
 - [Security Model](docs/security-model.md)
 
