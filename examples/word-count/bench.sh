@@ -5,7 +5,7 @@ INPUT=${INPUT:-../../README.md}
 QIP=${QIP:-../../qip}
 WARMUP_RUNS=${WARMUP_RUNS:-5}
 RUNS=${RUNS:-20}
-INNER_LOOPS=${INNER_LOOPS:-10}
+INNER_LOOPS=${INNER_LOOPS:-1}
 
 if ! command -v hyperfine >/dev/null 2>&1; then
   echo "hyperfine not found" >&2
@@ -53,24 +53,24 @@ add_cmd "go-optimized" "$(bench_cmd "./wordcount_optimized.go.bin < '$INPUT_ABS'
 if command -v node >/dev/null 2>&1; then
   add_cmd "node-simple" "$(bench_cmd "node ./wordcount_simple.mjs < '$INPUT_ABS'")"
   add_cmd "node-optimized" "$(bench_cmd "node ./wordcount_optimized.mjs < '$INPUT_ABS'")"
-  add_cmd "node-wasmjs-zig" "$(bench_cmd "node ./wordcount_wasm_runner.mjs ./wordcount_zig_wasm.wasm < '$INPUT_ABS'")"
-  add_cmd "node-wasmjs-c" "$(bench_cmd "node ./wordcount_wasm_runner.mjs ./wordcount_c_wasm.wasm < '$INPUT_ABS'")"
+  add_cmd "node-wasm-zig" "$(bench_cmd "node ./wordcount_wasm_runner.mjs ./wordcount_zig_wasm.wasm < '$INPUT_ABS'")"
+  add_cmd "node-wasm-c" "$(bench_cmd "node ./wordcount_wasm_runner.mjs ./wordcount_c_wasm.wasm < '$INPUT_ABS'")"
 fi
-add_cmd "wasm-qip-zig" "$(bench_cmd "'$QIP_ABS' run -i '$INPUT_ABS' ./wordcount_zig_wasm.wasm")"
-add_cmd "wasm-qip-c" "$(bench_cmd "'$QIP_ABS' run -i '$INPUT_ABS' ./wordcount_c_wasm.wasm")"
+add_cmd "qip-wasm-zig" "$(bench_cmd "'$QIP_ABS' run --timeout-ms 5000 -i '$INPUT_ABS' ./wordcount_zig_wasm.wasm")"
+add_cmd "qip-wasm-c" "$(bench_cmd "'$QIP_ABS' run --timeout-ms 5000 -i '$INPUT_ABS' ./wordcount_c_wasm.wasm")"
 
 if command -v bun >/dev/null 2>&1; then
   add_cmd "bun-simple" "$(bench_cmd "bun ./wordcount_simple.mjs < '$INPUT_ABS'")"
   add_cmd "bun-optimized" "$(bench_cmd "bun ./wordcount_optimized.mjs < '$INPUT_ABS'")"
-  add_cmd "bun-wasmjs-zig" "$(bench_cmd "bun ./wordcount_wasm_runner.mjs ./wordcount_zig_wasm.wasm < '$INPUT_ABS'")"
-  add_cmd "bun-wasmjs-c" "$(bench_cmd "bun ./wordcount_wasm_runner.mjs ./wordcount_c_wasm.wasm < '$INPUT_ABS'")"
+  add_cmd "bun-wasm-zig" "$(bench_cmd "bun ./wordcount_wasm_runner.mjs ./wordcount_zig_wasm.wasm < '$INPUT_ABS'")"
+  add_cmd "bun-wasm-c" "$(bench_cmd "bun ./wordcount_wasm_runner.mjs ./wordcount_c_wasm.wasm < '$INPUT_ABS'")"
 fi
 
 if command -v deno >/dev/null 2>&1; then
   add_cmd "deno-simple" "$(bench_cmd "deno run -A ./wordcount_simple.mjs < '$INPUT_ABS'")"
   add_cmd "deno-optimized" "$(bench_cmd "deno run -A ./wordcount_optimized.mjs < '$INPUT_ABS'")"
-  add_cmd "deno-wasmjs-zig" "$(bench_cmd "deno run -A ./wordcount_wasm_runner.mjs ./wordcount_zig_wasm.wasm < '$INPUT_ABS'")"
-  add_cmd "deno-wasmjs-c" "$(bench_cmd "deno run -A ./wordcount_wasm_runner.mjs ./wordcount_c_wasm.wasm < '$INPUT_ABS'")"
+  add_cmd "deno-wasm-zig" "$(bench_cmd "deno run -A ./wordcount_wasm_runner.mjs ./wordcount_zig_wasm.wasm < '$INPUT_ABS'")"
+  add_cmd "deno-wasm-c" "$(bench_cmd "deno run -A ./wordcount_wasm_runner.mjs ./wordcount_c_wasm.wasm < '$INPUT_ABS'")"
 fi
 
 echo "benchmarking ${#CMDS[@]} commands"

@@ -32,8 +32,8 @@ if command -v node >/dev/null 2>&1; then
   run_cmd node_wasmjs_zig "node ./wordcount_wasm_runner.mjs ./wordcount_zig_wasm.wasm < '$INPUT'"
   run_cmd node_wasmjs_c "node ./wordcount_wasm_runner.mjs ./wordcount_c_wasm.wasm < '$INPUT'"
 fi
-run_cmd wasm_qip_zig "'$QIP' run -i '$INPUT' ./wordcount_zig_wasm.wasm"
-run_cmd wasm_qip_c "'$QIP' run -i '$INPUT' ./wordcount_c_wasm.wasm"
+run_cmd wasm_qip_zig "'$QIP' run --timeout-ms 5000 -i '$INPUT' ./wordcount_zig_wasm.wasm"
+run_cmd wasm_qip_c "'$QIP' run --timeout-ms 5000 -i '$INPUT' ./wordcount_c_wasm.wasm"
 
 if command -v bun >/dev/null 2>&1; then
   run_cmd bun_simple "bun ./wordcount_simple.mjs < '$INPUT'"

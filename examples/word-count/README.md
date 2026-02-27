@@ -49,6 +49,12 @@ make build
 make verify INPUT=../../README.md
 ```
 
+For larger inputs (for example `moby-dick.txt`), the scripts use a fixed 5000ms timeout for qip Wasm runs:
+
+```bash
+make verify INPUT=./moby-dick.txt
+```
+
 ## Benchmark
 
 ```bash
@@ -56,9 +62,18 @@ make bench INPUT=../../README.md
 ```
 
 The benchmark script uses `hyperfine` and only runs commands for runtimes detected on your machine.
-It includes both `wasm-qip-zig` and `wasm-qip-c`, plus JS-hosted Wasm variants for Node/Bun/Deno.
+It includes both `qip-wasm-zig` and `qip-wasm-c`, plus JS-hosted Wasm variants for Node/Bun/Deno.
 You can tune stability with:
 
 ```bash
 WARMUP_RUNS=5 RUNS=20 INNER_LOOPS=10 make bench INPUT=../../README.md
 ```
+
+## Memory
+
+```bash
+make memory INPUT=../../README.md
+```
+
+This reports peak resident set size (`max_rss_mb`) for each runnable implementation.
+It relies on OS process metrics (`time` and/or `ps`) and may fail in restricted sandboxes.

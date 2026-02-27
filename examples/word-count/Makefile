@@ -1,4 +1,4 @@
-.PHONY: build verify bench clean
+.PHONY: build verify bench memory clean
 
 INPUT ?= ../../README.md
 QIP ?= ../../qip
@@ -47,6 +47,9 @@ verify: build
 
 bench: build
 	INPUT="$(INPUT)" QIP="$(QIP)" ./bench.sh
+
+memory: build
+	INPUT="$(INPUT)" QIP="$(QIP)" ./memory.sh
 
 clean:
 	rm -f *.bin *.wasm out.*
