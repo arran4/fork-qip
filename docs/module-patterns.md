@@ -182,6 +182,7 @@ Prefer trap when:
 - a safety invariant is violated
 - partial output would be misleading
 - preserving source data is more important than availability
+- output would otherwise be silently truncated
 
 Prefer soft failure when:
 

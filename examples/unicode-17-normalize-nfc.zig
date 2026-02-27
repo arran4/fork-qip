@@ -1,6 +1,6 @@
 // Normalize UTF-8 input to NFC. Traps on invalid input or overflow.
 
-const std = @import("std");
+const testing = @import("std").testing;
 
 const INPUT_CAP: usize = 1024 * 1024;
 const OUTPUT_CAP: usize = INPUT_CAP * 4;
@@ -340,43 +340,43 @@ fn normalizeForTest(input: []const u8) []const u8 {
 test "nfc normalizes combining sequence" {
     const input = "e\u{0301}";
     const output = normalizeForTest(input);
-    try std.testing.expectEqualStrings("\u{00E9}", output);
+    try testing.expectEqualStrings("\u{00E9}", output);
 }
 
 test "nfc composes hangul" {
     const input = "\u{1100}\u{1161}\u{11A8}";
     const output = normalizeForTest(input);
-    try std.testing.expectEqualStrings("\u{AC01}", output);
+    try testing.expectEqualStrings("\u{AC01}", output);
 }
 
 test "nfc leaves ascii unchanged" {
     const input = "hello";
     const output = normalizeForTest(input);
-    try std.testing.expectEqualStrings(input, output);
+    try testing.expectEqualStrings(input, output);
 }
 
 test "nfc reorders combining marks and composes" {
     const input = "D\u{0307}\u{0323}";
     const output = normalizeForTest(input);
-    try std.testing.expectEqualStrings("\u{1E0C}\u{0307}", output);
+    try testing.expectEqualStrings("\u{1E0C}\u{0307}", output);
 }
 
 test "nfc composes sequential combining marks" {
     const input = "E\u{0304}\u{0300}";
     const output = normalizeForTest(input);
-    try std.testing.expectEqualStrings("\u{1E14}", output);
+    try testing.expectEqualStrings("\u{1E14}", output);
 }
 
 test "nfc composes hangul with existing syllable" {
     const input = "\u{1100}\u{AC00}\u{11A8}";
     const output = normalizeForTest(input);
-    try std.testing.expectEqualStrings("\u{1100}\u{AC01}", output);
+    try testing.expectEqualStrings("\u{1100}\u{AC01}", output);
 }
 
 test "nfc reorders hebrew combining marks" {
     const input = "\u{05B8}\u{05B9}\u{05B1}\u{0591}\u{05C3}\u{05B0}\u{05AC}\u{059F}";
     const output = normalizeForTest(input);
-    try std.testing.expectEqualStrings("\u{05B1}\u{05B8}\u{05B9}\u{0591}\u{05C3}\u{05B0}\u{05AC}\u{059F}", output);
+    try testing.expectEqualStrings("\u{05B1}\u{05B8}\u{05B9}\u{0591}\u{05C3}\u{05B0}\u{05AC}\u{059F}", output);
 }
 
 // Generated from UnicodeData.txt and CompositionExclusions.txt (Unicode 17.0.0)

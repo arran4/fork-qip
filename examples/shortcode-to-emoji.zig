@@ -875,27 +875,22 @@ const EmojiMap = std.StaticStringMap([]const u8).initComptime(.{
 const Writer = struct {
     buf: []u8,
     idx: usize,
-    overflow: bool,
 
     fn init(buf: []u8) Writer {
-        return .{ .buf = buf, .idx = 0, .overflow = false };
+        return .{ .buf = buf, .idx = 0 };
     }
 
     fn writeByte(self: *Writer, b: u8) void {
-        if (self.overflow) return;
         if (self.idx >= self.buf.len) {
-            self.overflow = true;
-            return;
+            @trap();
         }
         self.buf[self.idx] = b;
         self.idx += 1;
     }
 
     fn writeSlice(self: *Writer, s: []const u8) void {
-        if (self.overflow) return;
         if (self.idx + s.len > self.buf.len) {
-            self.overflow = true;
-            return;
+            @trap();
         }
         @memcpy(self.buf[self.idx .. self.idx + s.len], s);
         self.idx += s.len;
@@ -910,7 +905,7 @@ export fn run(input_size: u32) u32 {
     const input = input_buf[0..@as(usize, @intCast(input_size))];
     var w = Writer.init(output_buf[0..]);
     var i: usize = 0;
-    while (i < input.len and !w.overflow) {
+    while (i < input.len) {
         if (input[i] == ':') {
             const start = i;
             i += 1;

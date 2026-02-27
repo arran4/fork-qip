@@ -91,6 +91,7 @@ Capacity units:
 - Validate `input_size` and trap on out-of-bounds assumptions drifting between host and module.
 - Reserve explicit scratch space if needed.
 - Preferred for data-preserving transforms: trap on invalid input/overflow so bad data does not silently become empty output.
+- Prefer trapping over silent truncation when output buffers fill.
 - Use `return 0` only when empty output is an intentional, non-error result.
 
 ## Image Mode Memory
