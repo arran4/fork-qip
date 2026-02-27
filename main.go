@@ -91,7 +91,7 @@ type options struct {
 }
 
 const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  route    Resolve routed paths and export route artifacts\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
-const usageRun = "Usage: qip run [-v] [-i <input>] <wasm module URL or file>..."
+const usageRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file>..."
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value ...] ..."
 const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
@@ -107,7 +107,7 @@ const usageHelp = "Usage: qip help [command]"
 var qipFormTagPattern = regexp.MustCompile(`(?is)<qip-form\b[^>]*>`)
 var qipFormNamePattern = regexp.MustCompile("(?is)\\bname\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))")
 
-const helpRun = "Usage: qip run [-v] [-i <input>] <wasm module URL or file>...\n\nModule contracts:\n  Run mode:\n    - Exports run(input_size), input_ptr, and input_utf8_cap or input_bytes_cap\n    - Exports output_ptr and output_utf8_cap or output_bytes_cap or output_i32_cap\n  Image mode:\n    - Exports tile_rgba_f32_64x64, input_ptr, input_bytes_cap\n    - Optional: uniform_set_width_and_height, calculate_halo_px\n\nComposition:\n  If a module exports tile_rgba_f32_64x64, qip run composes a contiguous image stage block.\n  Input to that block must be BMP bytes and the block outputs BMP bytes.\n  Run stages may follow and will receive BMP bytes.\n\nExample:\n  echo '<svg width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#d52b1e\" /><rect x=\"13\" y=\"6\" width=\"6\" height=\"20\" fill=\"#ffffff\" /><rect x=\"6\" y=\"13\" width=\"20\" height=\"6\" fill=\"#ffffff\" /></svg>' | ./qip run examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > out.ico"
+const helpRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file>...\n\nModule contracts:\n  Run mode:\n    - Exports run(input_size), input_ptr, and input_utf8_cap or input_bytes_cap\n    - Exports output_ptr and output_utf8_cap or output_bytes_cap or output_i32_cap\n  Image mode:\n    - Exports tile_rgba_f32_64x64, input_ptr, input_bytes_cap\n    - Optional: uniform_set_width_and_height, calculate_halo_px\n\nComposition:\n  If a module exports tile_rgba_f32_64x64, qip run composes a contiguous image stage block.\n  Input to that block must be BMP bytes and the block outputs BMP bytes.\n  Run stages may follow and will receive BMP bytes.\n\nExample:\n  echo '<svg width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#d52b1e\" /><rect x=\"13\" y=\"6\" width=\"6\" height=\"20\" fill=\"#ffffff\" /><rect x=\"6\" y=\"13\" width=\"20\" height=\"6\" fill=\"#ffffff\" /></svg>' | ./qip run examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > out.ico"
 const helpComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]\n\nBase validation (always run):\n  - Requires export memory\n  - Detects module kind: run, tile, or run+tile\n\n--with check modules:\n  - qip instantiates the implementation as module name \"impl\"\n  - each check module must import impl.memory\n  - each check module must export positive() -> i32\n  - optional: export negative() -> i32\n  - qip runs positive() first\n  - if negative() exists, qip runs it on a fresh impl instance and also provides host import qip.run_must_trap(i32) -> i32\n  - status > 0 passes, status <= 0 fails\n  - checks run in parallel; all must pass\n\nWAT shape (minimal):\n  (import \"impl\" \"memory\" (memory 1))\n  (import \"impl\" \"run\" (func $run (param i32) (result i32)))\n  (func (export \"positive\") (result i32)\n    i32.const 1)\n\nFailure behavior:\n  - if impl traps during positive(), that check fails immediately\n  - for negative(), call qip.run_must_trap(...) when trap is the expected outcome\n  - qip reports failing check path and any optional failure detail exports"
 
 func main() {
@@ -225,9 +225,11 @@ func runCmd(args []string) {
 	fs.SetOutput(io.Discard)
 	var runVerbose bool
 	var inputPath string
+	timeoutMS := 100
 	fs.BoolVar(&runVerbose, "v", false, "enable verbose logging")
 	fs.BoolVar(&runVerbose, "verbose", false, "enable verbose logging")
 	fs.StringVar(&inputPath, "i", "", "input file path")
+	fs.IntVar(&timeoutMS, "timeout-ms", timeoutMS, "per-run timeout in milliseconds")
 	if err := fs.Parse(args); err != nil {
 		gameOver("%s %v", usageRun, err)
 	}
@@ -236,6 +238,9 @@ func runCmd(args []string) {
 	modules := fs.Args()
 	if len(modules) < 1 {
 		gameOver(usageRun)
+	}
+	if timeoutMS <= 0 {
+		gameOver("Invalid timeout-ms: %d", timeoutMS)
 	}
 
 	var input []byte
@@ -285,7 +290,7 @@ func runCmd(args []string) {
 	defer chain.Close(context.Background())
 
 	execCtx := context.Background()
-	execCtx, cancel := wasmruntime.WithExecutionTimeout(execCtx, 100*time.Millisecond)
+	execCtx, cancel := wasmruntime.WithExecutionTimeout(execCtx, time.Duration(timeoutMS)*time.Millisecond)
 	defer cancel()
 
 	result, err := chain.run(execCtx, input, 0)
