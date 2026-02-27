@@ -124,7 +124,7 @@ func main() {
 	if args[0] == "help" || args[0] == "doc" {
 		helpCmd(args[1:])
 	} else if args[0] == "run" {
-		run(args[1:])
+		runCmd(args[1:])
 	} else if args[0] == "bench" {
 		benchCmd(args[1:])
 	} else if args[0] == "image" {
@@ -219,7 +219,7 @@ func readModulePath(path string, opts options) ([]byte, error) {
 	return body, nil
 }
 
-func run(args []string) {
+func runCmd(args []string) {
 	opts := options{}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
