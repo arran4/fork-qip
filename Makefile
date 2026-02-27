@@ -163,5 +163,8 @@ test-zig: $(ZIG_TEST_FILES)
 test-go:
 	go test $(GO_TEST_PKGS)
 
+site/favicon.ico: qip-logo.svg
+	./qip run -i qip-logo.svg -- examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > $@
+
 defluff:
 	find . -name '.DS_Store' -type f -delete

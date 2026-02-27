@@ -139,7 +139,7 @@ fn wrapHtml(input: []const u8, output: []u8, title_buf: []u8) usize {
     w.writeEscaped(title);
     w.writeSlice("</title><style>");
     w.writeSlice(EMBEDDED_STYLES);
-    w.writeSlice("</style></head>");
+    w.writeSlice("</style>");
     w.writeSlice(EMBEDDED_HEADER);
     w.writeSlice("<main>");
     w.writeSlice(input);

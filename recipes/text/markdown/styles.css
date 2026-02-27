@@ -1,6 +1,6 @@
 :root {
   font-size: 100%;
-  line-height: 1.8;
+  line-height: 1.5;
 
   --dark: 0;
   --invert: 0;
@@ -76,12 +76,21 @@ footer[role="contentinfo"] {
     gap: 2em;
     justify-content: center;
   }
+
+  a {
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
 }
 
 main {
   width: 100%;
   max-width: 44em;
   margin: 1lh auto;
+  padding: 0 1em;
 
   h1,
   h2,
@@ -95,10 +104,10 @@ main {
   }
   h1 {
     font-size: 2rem;
-    line-height: 1rlh;
+    line-height: 2rlh;
   }
   h2 {
-    font-size: 1rem;
+    font-size: 1.25rem;
   }
 }
 code,
