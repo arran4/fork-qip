@@ -2,11 +2,13 @@
 
 ## Small, secure, and predictable software components
 
-`qip` runs WebAssembly modules in a strict, composable pipeline. Each module you write does one focused job: e.g. parse, validate, transform, render, etc.
+`qip` is a tool for running vibe-coded WebAssembly modules in a strict, composable pipeline. Each module does one focused job: parse, validate, transform, render, and so on.
 
-These modules can be composed into ever greater units, such as a HTTP server or image effect pipeline.
+It lets you process text, data, and images, then compose modules into ever greater units, such as a website, an HTTP server, or an image effect pipeline.
 
 I like to think of `qip` as “React components but for everything (and that run anywhere).”
+
+Planned host integrations include Swift, React, and Elixir, pushing further toward write once, run anywhere.
 
 ## The problems with software today
 
@@ -23,6 +25,8 @@ With WebAssembly we get light cross-platform executables. We can really write on
 ## AI needs hard boundaries
 
 With agentic coding we get the ability to quickly mass produce software. But most programming languages today have wide capabilities that make untrustworthy code risky. Any generated line could read SSH keys or talk to the network or mine bitcoin. We need hard constraints.
+
+Coding agents are now good enough that you can vibe C or Zig modules that run super fast, as long as there are clear boundaries.
 
 `qip` forces you to break code into boundaries. Most modules follow a simple contract: there’s some input provided to the WebAssembly module, and there’s some output it produces. Since this contract is deterministic we can then cache easily using the input as a key. Since modules are self-contained and immutable we can also use them as a cache key. Connect these modules together and you get a deterministic pipeline. Weave these pipelines together and you get a predictable, understandable system.
 

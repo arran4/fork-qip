@@ -2,13 +2,15 @@
 
 Pockets of speed safely sewn together.
 
-`qip` lets you compose small modules for text and images. Modules do one thing well and can be piped together to make powerful replayable tools.
+`qip` is a tool for running composable modules within a strict sandbox. Modules work with text, data, and images and can be composed together into powerful pipelines. They run in the browser, on the server, natively on mobile and desktop.
 
 - **Quarantined**: modules run in a secure sandbox, with explicit input and output.
 - **Immutable**: modules are self-contained compiled .wasm units and usually avoid constant dependency updates.
 - **Portable**: WebAssembly pipelines run identically across platforms.
 
-These attribute make agentic coding a great fit for creating modules. WebAssembly is designed from the ground up for web browsers to be strongly isolated from the rest of the system. And you can use C or Zig to get near-native performance.
+These attributes make agentic coding the perfect fit for creating modules. Coding agents are now good enough that you can vibe C or Zig modules that run super fast, while WebAssembly ensures strong isolation from the rest of the system.
+
+Planned host integrations include Swift, React, and Elixir, making reusable logic that is write once, run anywhere.
 
 ![qip logo](qip-logo.svg)
 
@@ -18,7 +20,7 @@ These attribute make agentic coding a great fit for creating modules. WebAssembl
 go install github.com/royalicing/qip@latest
 ```
 
-By default no wasm modules are included. You can clone this repo to use the `./examples` that are provided.
+You can clone this repo to use the modules that are provided in `./examples` .
 
 ## Usage
 
@@ -171,7 +173,9 @@ qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/col
 
 - [ ] Add digest pinning for remote modules (for example `https://...#sha256=<hex>`), and fail fast when fetched bytes do not match the pinned digest.
 - [ ] Update docs to encourage hard failure with traps instead of returning empty output which could lead to data loss.
+- [ ] Add `--host` flag to `qip route warc` so we can set the host to something other than `qip.local`
 - [ ] Add `qip serve` command that runs the server in `prod` mode by default, and includes a module upload endpoint.
+- [ ] Add uniforms to `qip run` and allow uniforms for all module types, not just image tile modules.
 - [ ] Add `random_ptr` and `random_size` to modules that the host can detect and fill in with random data. It can choose to seed with determinism or use a cryptographic source of randomness — it’s up to the host.
 - [ ] Add `--postcondition` or `--outmust` flag to `qip run` that verifies the final output conforms to a particular module e.g. `--postcondition valid-xml-1.0.wasm`.
 - [ ] Add `qip photocopy` command that observes an existing tool’s input/output behavior and generates a behaviorally similar QIP module implementation in wasm, then validates it with duel/fuzz tests and reports divergences.
