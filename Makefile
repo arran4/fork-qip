@@ -7,10 +7,12 @@ include ./examples/sqlite3/sqlite.mk
 WASM_STACK_SIZE ?= 65536
 WASM_STACK_FLAG := -Wl,-z,stack-size=$(WASM_STACK_SIZE)
 ZIG_WASM_FLAGS := -target wasm32-freestanding -O ReleaseSmall -fno-entry -rdynamic
+GO_FIX_PKGS := ./cmd/... ./internal/... ./tools/...
+GO_FMT_PKGS := . ./cmd/... ./internal/... ./tools/...
 
 qip: main.go go.mod go.sum $(wildcard internal/*.go)
-	go fix ./...
-	go fmt ./...
+	go fix $(GO_FIX_PKGS)
+	go fmt $(GO_FMT_PKGS)
 	go build -ldflags="-s -w" -trimpath
 
 compliance/%.wasm: compliance/%.wat
