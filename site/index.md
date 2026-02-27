@@ -67,4 +67,4 @@ Good tools should be:
 
 ---
 
-- [How qip Works](./how-it-works.md)
+- [How qip Works](./how-it-works)
