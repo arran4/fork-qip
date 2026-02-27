@@ -16,7 +16,7 @@ Planned host integrations include Swift, React, and Elixir, making reusable logi
 
 ## Install
 
-```
+```sh
 go install github.com/royalicing/qip@latest
 ```
 
