@@ -429,3 +429,9 @@ Use `output_utf8_cap` for UTF-8 text output and `output_bytes_cap` for binary ou
 If omitted, then the return value of `run` is used as the result.
 
 If exported, then the return value of `run` is used as the size of the output.
+
+## Building the site
+
+```sh
+go install github.com/royalicing/qip@latest && qip route warc ./site --recipes recipes --forms examples | qip run examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir site-static && tar -xvf site-static.tar -C site-static
+```
