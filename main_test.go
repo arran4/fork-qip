@@ -155,7 +155,7 @@ func TestBuildRouteListEntries(t *testing.T) {
 			"/images/logo/": {FilePath: "docs/images/logo.png", SourceMIME: "image/png"},
 		},
 		routeOptions: qinternal.DefaultRouteOptions(),
-		recipeChains: map[string]*moduleChain{
+		recipeChains: map[string]*qinternal.Pipeline{
 			"text/markdown": nil,
 		},
 	}
@@ -321,7 +321,7 @@ func TestLoadRecipeChainsIgnoresNonWasm(t *testing.T) {
 		t.Fatalf("loadRecipeChains error: %v", err)
 	}
 	t.Cleanup(func() {
-		closeModuleChains(context.Background(), chains)
+		closePipelines(context.Background(), chains)
 	})
 
 	chain, ok := chains["text/markdown"]

@@ -283,39 +283,45 @@ func runCmd(args []string) {
 		}
 	}()
 
-	chain, err := buildModuleChain(context.Background(), modules, opts)
+	pipeline, err := buildPipeline(context.Background(), modules, opts)
 	if err != nil {
 		gameOver("%v", err)
 	}
-	defer chain.Close(context.Background())
+	defer pipeline.Close(context.Background())
 
 	execCtx := context.Background()
 	execCtx, cancel := wasmruntime.WithExecutionTimeout(execCtx, time.Duration(timeoutMS)*time.Millisecond)
 	defer cancel()
 
-	result, err := chain.run(execCtx, input, 0)
+	initialContent := qinternal.NewRawBytesContent(input)
+	result, err := pipeline.Process(execCtx, initialContent, 0)
 	if err != nil {
 		gameOver("%v", err)
 	}
 
-	if result.output.encoding == dataEncodingRaw {
-		if _, err := os.Stdout.Write(result.output.bytes); err != nil {
+	result, outputBytes, err := ensureRawContent(result)
+	if err != nil {
+		gameOver("%v", err)
+	}
+
+	if result.Encoding() == qinternal.EncodingRawBytes || result.Encoding() == qinternal.EncodingBMP {
+		if _, err := os.Stdout.Write(outputBytes); err != nil {
 			gameOver("Error writing raw output: %v", err)
 		}
-	} else if result.output.encoding == dataEncodingUTF8 {
-		fmt.Printf("%s\n", result.output.bytes)
-	} else if result.output.encoding == dataEncodingArrayI32 {
+	} else if result.Encoding() == qinternal.EncodingUTF8 {
+		fmt.Printf("%s\n", outputBytes)
+	} else if result.Encoding() == qinternal.EncodingI32Array {
 		if opts.verbose {
-			fmt.Fprintln(os.Stderr, result.output.bytes)
+			fmt.Fprintln(os.Stderr, outputBytes)
 		}
 
-		count := len(result.output.bytes) / 4
+		count := len(outputBytes) / 4
 		if count >= 1 {
 			bufSize := count * 9
 			writer := bufio.NewWriterSize(os.Stdout, bufSize)
 			defer writer.Flush()
-			for i := range count {
-				v := binary.LittleEndian.Uint32(result.output.bytes[i*4:])
+			for i := 0; i < count; i++ {
+				v := binary.LittleEndian.Uint32(outputBytes[i*4:])
 				if opts.verbose {
 					vlogf(opts, "u32: %d", v)
 				}
@@ -327,6 +333,11 @@ func runCmd(args []string) {
 	}
 }
 
+// run is retained for test helper compatibility.
+func run(args []string) {
+	runCmd(args)
+}
+
 type benchSample struct {
 	total          time.Duration
 	instantiation  time.Duration
@@ -335,6 +346,13 @@ type benchSample struct {
 	inputCapBytes  uint64
 	outputCapBytes uint64
 }
+
+type benchModuleKind uint8
+
+const (
+	benchModuleKindRun benchModuleKind = iota
+	benchModuleKindTile
+)
 
 type durationStats struct {
 	mean   time.Duration
@@ -422,6 +440,7 @@ func benchCmd(args []string) {
 
 	moduleCount := len(modules)
 	compiled := make([]wazero.CompiledModule, moduleCount)
+	moduleKinds := make([]benchModuleKind, moduleCount)
 	compileDur := make([]time.Duration, moduleCount)
 	moduleSizes := make([]uint64, moduleCount)
 	moduleGzipSizes := make([]uint64, moduleCount)
@@ -442,6 +461,17 @@ func benchCmd(args []string) {
 		if err != nil {
 			gameOver("Wasm module could not be compiled")
 		}
+		funcs := cm.ExportedFunctions()
+		_, hasRun := funcs["run"]
+		_, hasTile := funcs["tile_rgba_f32_64x64"]
+		switch {
+		case hasTile:
+			moduleKinds[i] = benchModuleKindTile
+		case hasRun:
+			moduleKinds[i] = benchModuleKindRun
+		default:
+			gameOver("bench check failed for %s: Wasm module must export run(i32) -> i32 or tile_rgba_f32_64x64(f32, f32)", modules[i])
+		}
 		compiled[i] = cm
 		defer compiled[i].Close(ctx)
 	}
@@ -449,14 +479,14 @@ func benchCmd(args []string) {
 	perRunTimeout := time.Duration(timeoutMS) * time.Millisecond
 	moduleInputCaps := make([]uint64, moduleCount)
 	moduleOutputCaps := make([]uint64, moduleCount)
-	firstSample, expected, err := runBenchSample(ctx, runtime, compiled[0], inputBytes, opts, "bench-0-check", perRunTimeout)
+	firstSample, expected, err := runBenchSampleByKind(ctx, runtime, compiled[0], moduleKinds[0], inputBytes, opts, "bench-0-check", perRunTimeout)
 	if err != nil {
 		gameOver("bench check failed for %s: %v", modules[0], err)
 	}
 	moduleInputCaps[0] = firstSample.inputCapBytes
 	moduleOutputCaps[0] = firstSample.outputCapBytes
 	for i := 1; i < moduleCount; i++ {
-		sample, output, err := runBenchSample(ctx, runtime, compiled[i], inputBytes, opts, fmt.Sprintf("bench-%d-check", i), perRunTimeout)
+		sample, output, err := runBenchSampleByKind(ctx, runtime, compiled[i], moduleKinds[i], inputBytes, opts, fmt.Sprintf("bench-%d-check", i), perRunTimeout)
 		if err != nil {
 			gameOver("bench check failed for %s: %v", modules[i], err)
 		}
@@ -479,10 +509,11 @@ func benchCmd(args []string) {
 		startIndex := i % moduleCount
 		for j := range moduleCount {
 			moduleIndex := (startIndex + j) % moduleCount
-			sample, output, err := runBenchSample(
+			sample, output, err := runBenchSampleByKind(
 				ctx,
 				runtime,
 				compiled[moduleIndex],
+				moduleKinds[moduleIndex],
 				inputBytes,
 				opts,
 				fmt.Sprintf("bench-%d-run-%d", moduleIndex, i),
@@ -593,6 +624,79 @@ func runBenchSample(
 		outputCapBytes: exec.outputCapBytes,
 	}
 	return sample, exec.output, nil
+}
+
+func runBenchSampleByKind(
+	parent context.Context,
+	runtime wazero.Runtime,
+	compiled wazero.CompiledModule,
+	kind benchModuleKind,
+	inputBytes []byte,
+	opts options,
+	moduleName string,
+	timeout time.Duration,
+) (benchSample, contentData, error) {
+	switch kind {
+	case benchModuleKindRun:
+		return runBenchSample(parent, runtime, compiled, inputBytes, opts, moduleName, timeout)
+	case benchModuleKindTile:
+		return runBenchTileSample(parent, runtime, compiled, inputBytes, moduleName, timeout)
+	default:
+		return benchSample{}, contentData{}, errors.New("unknown bench module kind")
+	}
+}
+
+func runBenchTileSample(
+	parent context.Context,
+	runtime wazero.Runtime,
+	compiled wazero.CompiledModule,
+	inputBytes []byte,
+	moduleName string,
+	timeout time.Duration,
+) (benchSample, contentData, error) {
+	ctx := parent
+	cancel := func() {}
+	if timeout > 0 {
+		ctxWithTimeout, cancelWithTimeout := wasmruntime.WithExecutionTimeout(parent, timeout)
+		ctx = ctxWithTimeout
+		cancel = cancelWithTimeout
+	}
+	defer cancel()
+
+	inputRGBA, err := decodeBMP(inputBytes)
+	if err != nil {
+		return benchSample{}, contentData{}, fmt.Errorf("tile bench input must be BMP: %w", err)
+	}
+
+	start := time.Now()
+	outputRGBA, instDurations, stageDurations, err := runTileStagesCompiled(
+		ctx,
+		runtime,
+		[]wazero.CompiledModule{compiled},
+		inputRGBA,
+		moduleName,
+		0,
+	)
+	total := time.Since(start)
+	if err != nil {
+		return benchSample{}, contentData{}, err
+	}
+
+	outBytes, err := encodeBMP(outputRGBA)
+	if err != nil {
+		return benchSample{}, contentData{}, err
+	}
+
+	sample := benchSample{
+		total: total,
+	}
+	if len(instDurations) > 0 {
+		sample.instantiation = instDurations[0]
+	}
+	if len(stageDurations) > 0 {
+		sample.run = stageDurations[0]
+	}
+	return sample, contentData{bytes: outBytes, encoding: dataEncodingRaw}, nil
 }
 
 func summarizeBench(samples []benchSample) benchSummary {
@@ -1099,6 +1203,7 @@ func runTileStages(ctx context.Context, stages []tileStage, inputRGBA *image.RGB
 				}
 				for stageIndex := range stages {
 					stage := &stages[stageIndex]
+					stageStart := time.Now()
 					if !stage.mem.Write(stage.inputPtr, tileBytes) {
 						return nil, nil, errors.New("Could not write tile to wasm memory")
 					}
@@ -1114,6 +1219,7 @@ func runTileStages(ctx context.Context, stages []tileStage, inputRGBA *image.RGB
 						return nil, nil, errors.New("Could not read tile from wasm memory")
 					}
 					copy(tileBytes, tileOutBytes)
+					stageDurations[stageIndex] += time.Since(stageStart)
 				}
 				tileOutF32 := tileF32
 				for row := 0; row < tileH; row++ {
@@ -1464,7 +1570,7 @@ func imageCmd(args []string) {
 
 	stages := make([]tileStage, len(moduleBodies))
 	for i, body := range moduleBodies {
-		mod, err := r.InstantiateWithConfig(execCtx, body, wazero.NewModuleConfig())
+		mod, err := r.InstantiateWithConfig(execCtx, body, wazero.NewModuleConfig().WithName(fmt.Sprintf("image-%d", i)))
 		if err != nil {
 			gameOver("Wasm module could not be compiled")
 		}
@@ -1478,7 +1584,8 @@ func imageCmd(args []string) {
 		stages[i] = stage
 	}
 	defer closeTileStages(baseCtx, stages)
-	outputRGBA, _, err := runTileStages(execCtx, stages, inputRGBA)
+
+	finalRGBA, _, err := runTileStages(execCtx, stages, inputRGBA)
 	if err != nil {
 		gameOver("%v", err)
 	}
@@ -1489,7 +1596,7 @@ func imageCmd(args []string) {
 	}
 	defer outFile.Close()
 	encoder := png.Encoder{CompressionLevel: png.NoCompression}
-	if err := encoder.Encode(outFile, outputRGBA); err != nil {
+	if err := encoder.Encode(outFile, finalRGBA); err != nil {
 		gameOver("Error writing output image: %v", err)
 	}
 }
@@ -1614,6 +1721,10 @@ func executeModuleWithInput(ctx context.Context, runtime wazero.Runtime, compile
 	exec.outputCapBytes = uint64(outputCap)
 
 	runFunc := mod.ExportedFunction("run")
+	if runFunc == nil {
+		returnErr = errors.New("Wasm module must export run(i32) -> i32")
+		return
+	}
 
 	var inputSize = uint64(len(inputBytes))
 	if inputSize > inputCap {
@@ -1711,7 +1822,7 @@ type moduleFileStamp struct {
 type devRuntimeState struct {
 	contentRoutes map[string]qinternal.ContentRoute
 	routeOptions  qinternal.RouteOptions
-	recipeChains  map[string]*moduleChain
+	recipeChains  map[string]*qinternal.Pipeline
 	recipeDigests map[string][][32]byte
 	recipeStamps  map[string]moduleFileStamp
 	formModules   map[string][]byte
@@ -1794,7 +1905,7 @@ func devCmd(args []string) {
 		state = nextState
 		stateMu.Unlock()
 		if previous != nil {
-			closeModuleChains(context.Background(), previous.recipeChains)
+			closePipelines(context.Background(), previous.recipeChains)
 		}
 	}
 	reloadRuntimeState := func(reason string) {
@@ -1850,7 +1961,7 @@ func devCmd(args []string) {
 		state = nil
 		stateMu.Unlock()
 		if current != nil {
-			closeModuleChains(context.Background(), current.recipeChains)
+			closePipelines(context.Background(), current.recipeChains)
 		}
 	}()
 
@@ -1982,7 +2093,7 @@ func routePathCmd(args []string, method string, usage string, logPrefix string) 
 		state = nil
 		stateMu.Unlock()
 		if current != nil {
-			closeModuleChains(context.Background(), current.recipeChains)
+			closePipelines(context.Background(), current.recipeChains)
 		}
 	}()
 
@@ -2093,7 +2204,7 @@ func routeListCmd(args []string) {
 	if err != nil {
 		gameOver("%v", err)
 	}
-	defer closeModuleChains(context.Background(), state.recipeChains)
+	defer closePipelines(context.Background(), state.recipeChains)
 
 	entries := buildRouteListEntries(state)
 	for _, entry := range entries {
@@ -2129,7 +2240,7 @@ func buildRouteListEntries(state *devRuntimeState) []routeListEntry {
 	for _, requestPath := range paths {
 		route := canonicalRoutes[requestPath]
 		_, hasRecipes := state.recipeChains[route.SourceMIME]
-		contentType := devResponseContentType(route.SourceMIME, hasRecipes, contentData{encoding: dataEncodingRaw}, nil)
+		contentType := devResponseContentType(route.SourceMIME, hasRecipes, qinternal.NewRawBytesContent(nil), nil)
 		contentType = mediaTypeOnly(contentType)
 		entries = append(entries, routeListEntry{
 			Method:      http.MethodGet,
@@ -2253,7 +2364,7 @@ func routeCmd(args []string) {
 		if runtime == nil || runtime.state == nil {
 			return
 		}
-		closeModuleChains(context.Background(), runtime.state.recipeChains)
+		closePipelines(context.Background(), runtime.state.recipeChains)
 		runtime.state = nil
 	}()
 
@@ -2332,47 +2443,35 @@ func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRu
 			}
 			sourceDigest := sha256.Sum256(inputBytes)
 
-			result := chainResult{
-				output: contentData{bytes: inputBytes, encoding: dataEncodingRaw},
-				metrics: chainMetrics{
-					moduleDurations:        []time.Duration{},
-					instantiationDurations: []time.Duration{},
-				},
-			}
-			_, hasRecipes := current.recipeChains[route.SourceMIME]
+			var result qinternal.Content = qinternal.NewRawBytesContent(inputBytes)
+			hasRecipes := current.recipeChains[route.SourceMIME] != nil
 			if hasRecipes {
-				chain := current.recipeChains[route.SourceMIME]
+				pipeline := current.recipeChains[route.SourceMIME]
 				ctx := context.Background()
 				ctx, cancel := wasmruntime.WithExecutionTimeout(ctx, 100*time.Millisecond)
 				defer cancel()
-				result, err = chain.run(ctx, inputBytes, reqID)
+				result, err = pipeline.Process(ctx, result, reqID)
 				if err != nil {
 					stateMu.RUnlock()
-					return qinternal.RoutedResponse{
-						ModuleDurations:        result.metrics.moduleDurations,
-						InstantiationDurations: result.metrics.instantiationDurations,
-					}, err
+					return qinternal.RoutedResponse{}, err
 				}
 			}
 
-			body, err := formatOutputBytes(result.output)
+			result, body, err := ensureRawContent(result)
 			if err != nil {
 				stateMu.RUnlock()
-				return qinternal.RoutedResponse{
-					ModuleDurations:        result.metrics.moduleDurations,
-					InstantiationDurations: result.metrics.instantiationDurations,
-				}, err
+				return qinternal.RoutedResponse{}, err
 			}
 
-			contentType := devResponseContentType(route.SourceMIME, hasRecipes, result.output, body)
+			contentType := devResponseContentType(route.SourceMIME, hasRecipes, result, body)
 			formDigests := make([][32]byte, 0)
 			if strings.HasPrefix(contentType, "text/html") {
 				body, formDigests, err = injectQIPFormRuntime(body, current.formModules, current.formDigests)
 				if err != nil {
 					stateMu.RUnlock()
 					return qinternal.RoutedResponse{
-						ModuleDurations:        result.metrics.moduleDurations,
-						InstantiationDurations: result.metrics.instantiationDurations,
+						ModuleDurations:        []time.Duration{},
+						InstantiationDurations: []time.Duration{},
 					}, err
 				}
 			}
@@ -2387,8 +2486,8 @@ func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRu
 					return qinternal.RoutedResponse{
 						StatusCode:             http.StatusNotModified,
 						Header:                 headers,
-						ModuleDurations:        result.metrics.moduleDurations,
-						InstantiationDurations: result.metrics.instantiationDurations,
+						ModuleDurations:        []time.Duration{},
+						InstantiationDurations: []time.Duration{},
 					}, nil
 				}
 			}
@@ -2398,8 +2497,8 @@ func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRu
 				StatusCode:             http.StatusOK,
 				Header:                 headers,
 				Body:                   body,
-				ModuleDurations:        result.metrics.moduleDurations,
-				InstantiationDurations: result.metrics.instantiationDurations,
+				ModuleDurations:        []time.Duration{},
+				InstantiationDurations: []time.Duration{},
 			}, nil
 		},
 	})
@@ -2416,12 +2515,12 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 	}
 	recipeStamps, err := scanRecipeModuleStamps(recipesRoot)
 	if err != nil {
-		closeModuleChains(ctx, recipeChains)
+		closePipelines(ctx, recipeChains)
 		return nil, err
 	}
 	formModules, formDigests, err := loadFormModules(formsRoot)
 	if err != nil {
-		closeModuleChains(ctx, recipeChains)
+		closePipelines(ctx, recipeChains)
 		return nil, err
 	}
 	return &devRuntimeState{
@@ -2538,8 +2637,8 @@ func isASCII(s string) bool {
 	return true
 }
 
-func loadRecipeChains(ctx context.Context, recipesRoot string, opts options) (map[string]*moduleChain, map[string][][32]byte, error) {
-	chains := make(map[string]*moduleChain)
+func loadRecipeChains(ctx context.Context, recipesRoot string, opts options) (map[string]*qinternal.Pipeline, map[string][][32]byte, error) {
+	chains := make(map[string]*qinternal.Pipeline)
 	digestsByMIME := make(map[string][][32]byte)
 	if recipesRoot == "" {
 		return chains, digestsByMIME, nil
@@ -2625,12 +2724,12 @@ func loadRecipeChains(ctx context.Context, recipesRoot string, opts options) (ma
 			modulePaths[i] = candidate.path
 			digests[i] = candidate.digest
 		}
-		chain, err := buildModuleChain(ctx, modulePaths, opts)
+		pipeline, err := buildPipeline(ctx, modulePaths, opts)
 		if err != nil {
-			closeModuleChains(ctx, chains)
+			closePipelines(ctx, chains)
 			return nil, nil, err
 		}
-		chains[mimeType] = chain
+		chains[mimeType] = pipeline
 		digestsByMIME[mimeType] = digests
 	}
 
@@ -2757,9 +2856,9 @@ func loadFormModules(formsRoot string) (map[string][]byte, map[string][32]byte, 
 	return modules, digests, nil
 }
 
-func closeModuleChains(ctx context.Context, chains map[string]*moduleChain) {
-	for _, chain := range chains {
-		chain.Close(ctx)
+func closePipelines(ctx context.Context, pipelines map[string]*qinternal.Pipeline) {
+	for _, p := range pipelines {
+		p.Close(ctx)
 	}
 }
 
@@ -3112,15 +3211,18 @@ if (!customElements.get("qip-form")) {
 }
 `
 
-func devResponseContentType(sourceMIME string, recipesApplied bool, output contentData, body []byte) string {
+func devResponseContentType(sourceMIME string, recipesApplied bool, output qinternal.Content, body []byte) string {
 	if recipesApplied && sourceMIME == "text/markdown" {
 		return "text/html; charset=utf-8"
 	}
-	if output.encoding == dataEncodingRaw {
+	if output.Encoding() == qinternal.EncodingBMP {
+		return "image/bmp"
+	}
+	if output.Encoding() == qinternal.EncodingRawBytes {
 		if isICOBytes(body) {
 			return "image/x-icon"
 		}
-		if isBMPBytes(body) {
+		if _, _, err := qinternal.GetBMPDimensions(body); err == nil {
 			return "image/bmp"
 		}
 	}
@@ -3133,16 +3235,6 @@ func devResponseContentType(sourceMIME string, recipesApplied bool, output conte
 	return sourceMIME
 }
 
-type chainMetrics struct {
-	moduleDurations        []time.Duration
-	instantiationDurations []time.Duration
-}
-
-type chainResult struct {
-	output  contentData
-	metrics chainMetrics
-}
-
 type stageKind uint8
 
 const (
@@ -3150,251 +3242,245 @@ const (
 	stageKindTile
 )
 
-type moduleStage struct {
-	compiled wazero.CompiledModule
-	kind     stageKind
-}
-
-type moduleChain struct {
-	runtime          wazero.Runtime
-	stages           []moduleStage
-	opts             options
-	compileDurations []time.Duration
-}
-
-func buildModuleChain(ctx context.Context, modules []string, opts options) (*moduleChain, error) {
+func buildPipeline(ctx context.Context, modules []string, opts options) (*qinternal.Pipeline, error) {
 	if len(modules) == 0 {
-		return &moduleChain{opts: opts}, nil
+		return &qinternal.Pipeline{}, nil
 	}
 
 	runtime := wasmruntime.New(ctx)
-	stages := make([]moduleStage, len(modules))
-	compileDurations := make([]time.Duration, len(modules))
+
+	type moduleInfo struct {
+		path string
+		cm   wazero.CompiledModule
+		kind stageKind
+	}
+	infos := make([]moduleInfo, len(modules))
+
+	var stages []qinternal.Stage
+	cleanup := func() {
+		for _, stage := range stages {
+			_ = stage.Close(ctx)
+		}
+		for _, info := range infos {
+			if info.cm != nil {
+				_ = info.cm.Close(ctx)
+			}
+		}
+		_ = runtime.Close(ctx)
+	}
 
 	for i, modulePath := range modules {
 		body, err := readModulePath(modulePath, opts)
 		if err != nil {
-			_ = runtime.Close(ctx)
+			cleanup()
 			return nil, err
 		}
-		start := time.Now()
 		cm, err := runtime.CompileModule(ctx, body)
-		compileDurations[i] = time.Since(start)
 		if err != nil {
-			_ = runtime.Close(ctx)
-			return nil, errors.New("Wasm module could not be compiled")
+			cleanup()
+			return nil, fmt.Errorf("wasm module %q could not be compiled: %w", modulePath, err)
 		}
+
 		kind := stageKindRun
 		if _, ok := cm.ExportedFunctions()["tile_rgba_f32_64x64"]; ok {
 			kind = stageKindTile
 		}
-		stages[i] = moduleStage{
-			compiled: cm,
-			kind:     kind,
-		}
-		if opts.verbose {
-			vlogf(opts, "compiled module[%d] in %dms", i, compileDurations[i].Milliseconds())
-		}
+		infos[i] = moduleInfo{path: modulePath, cm: cm, kind: kind}
 	}
 
-	seenTile := false
-	seenRunAfterTile := false
-	for i, stage := range stages {
-		if stage.kind == stageKindTile {
-			if seenRunAfterTile {
-				_ = runtime.Close(ctx)
-				return nil, fmt.Errorf("Image stages must be contiguous to compose (module %d)", i)
+	for i := 0; i < len(infos); {
+		info := infos[i]
+		if info.kind == stageKindRun {
+			driver := &wasmRunDriver{
+				runtime:  runtime,
+				compiled: info.cm,
+				name:     fmt.Sprintf("stage-%d", i),
+				opts:     opts,
 			}
-			seenTile = true
-			continue
-		}
-		if seenTile {
-			seenRunAfterTile = true
-		}
-	}
-
-	return &moduleChain{
-		runtime:          runtime,
-		stages:           stages,
-		opts:             opts,
-		compileDurations: compileDurations,
-	}, nil
-}
-
-func (chain *moduleChain) Close(ctx context.Context) {
-	for _, stage := range chain.stages {
-		_ = stage.compiled.Close(ctx)
-	}
-	if chain.runtime != nil {
-		_ = chain.runtime.Close(ctx)
-	}
-}
-
-func (chain *moduleChain) run(ctx context.Context, input []byte, requestID uint64) (chainResult, error) {
-	if len(chain.stages) == 0 {
-		return chainResult{
-			output: contentData{bytes: input, encoding: dataEncodingRaw},
-			metrics: chainMetrics{
-				moduleDurations:        []time.Duration{},
-				instantiationDurations: []time.Duration{},
-			},
-		}, nil
-	}
-
-	moduleDurations := make([]time.Duration, len(chain.stages))
-	instantiationDurations := make([]time.Duration, len(chain.stages))
-	var output contentData
-	cur := input
-
-	tileStart := -1
-	tileEnd := -1
-	for i, stage := range chain.stages {
-		if stage.kind == stageKindTile {
-			if tileStart == -1 {
-				tileStart = i
-			}
-			tileEnd = i
-		}
-	}
-
-	runRunStages := func(start, end int, inputBytes []byte) (contentData, []byte, error) {
-		curBytes := inputBytes
-		var localOutput contentData
-		for i := start; i < end; i++ {
-			stage := chain.stages[i]
-			moduleName := fmt.Sprintf("req-%d-%d", requestID, i)
-			runStart := time.Now()
-			nextOutput, instDur, err := runModuleWithInput(ctx, chain.runtime, stage.compiled, curBytes, chain.opts, moduleName)
-			moduleDurations[i] = time.Since(runStart)
-			instantiationDurations[i] = instDur
-			if err != nil {
-				return localOutput, curBytes, err
-			}
-			localOutput = nextOutput
-			curBytes = nextOutput.bytes
-		}
-		return localOutput, curBytes, nil
-	}
-
-	if tileStart == -1 {
-		out, curBytes, err := runRunStages(0, len(chain.stages), cur)
-		if err != nil {
-			return chainResult{
-				output: out,
-				metrics: chainMetrics{
-					moduleDurations:        moduleDurations,
-					instantiationDurations: instantiationDurations,
-				},
-			}, err
-		}
-		output = out
-		cur = curBytes
-	} else {
-		if tileStart > 0 {
-			out, curBytes, err := runRunStages(0, tileStart, cur)
-			if err != nil {
-				return chainResult{
-					output: out,
-					metrics: chainMetrics{
-						moduleDurations:        moduleDurations,
-						instantiationDurations: instantiationDurations,
-					},
-				}, err
-			}
-			output = out
-			cur = curBytes
-			if output.encoding != dataEncodingRaw {
-				return chainResult{
-					output: output,
-					metrics: chainMetrics{
-						moduleDurations:        moduleDurations,
-						instantiationDurations: instantiationDurations,
-					},
-				}, errors.New("Image stage requires raw BMP bytes as input")
-			}
+			stages = append(stages, &qinternal.RunStage{Driver: driver})
+			i++
 		} else {
-			output = contentData{bytes: cur, encoding: dataEncodingRaw}
-		}
-
-		inputRGBA, err := decodeBMP(cur)
-		if err != nil {
-			return chainResult{
-				output: output,
-				metrics: chainMetrics{
-					moduleDurations:        moduleDurations,
-					instantiationDurations: instantiationDurations,
-				},
-			}, err
-		}
-		tileCompiled := make([]wazero.CompiledModule, tileEnd-tileStart+1)
-		for i := tileStart; i <= tileEnd; i++ {
-			tileCompiled[i-tileStart] = chain.stages[i].compiled
-		}
-		moduleNamePrefix := fmt.Sprintf("req-%d", requestID)
-		tileOutput, instDurs, stageDurs, err := runTileStagesCompiled(ctx, chain.runtime, tileCompiled, inputRGBA, moduleNamePrefix, tileStart)
-		for i := range instDurs {
-			instantiationDurations[tileStart+i] = instDurs[i]
-		}
-		for i := range stageDurs {
-			moduleDurations[tileStart+i] = stageDurs[i]
-		}
-		if err != nil {
-			return chainResult{
-				output: output,
-				metrics: chainMetrics{
-					moduleDurations:        moduleDurations,
-					instantiationDurations: instantiationDurations,
-				},
-			}, err
-		}
-		bmpBytes, err := encodeBMP(tileOutput)
-		if err != nil {
-			return chainResult{
-				output: output,
-				metrics: chainMetrics{
-					moduleDurations:        moduleDurations,
-					instantiationDurations: instantiationDurations,
-				},
-			}, err
-		}
-		output = contentData{bytes: bmpBytes, encoding: dataEncodingRaw}
-		cur = bmpBytes
-
-		if tileEnd+1 < len(chain.stages) {
-			out, curBytes, err := runRunStages(tileEnd+1, len(chain.stages), cur)
-			if err != nil {
-				return chainResult{
-					output: out,
-					metrics: chainMetrics{
-						moduleDurations:        moduleDurations,
-						instantiationDurations: instantiationDurations,
-					},
-				}, err
+			// Group contiguous tile modules
+			var tileDrivers []qinternal.TileModuleDriver
+			for i < len(infos) && infos[i].kind == stageKindTile {
+				driver := &wasmTileModuleDriver{
+					runtime:  runtime,
+					compiled: infos[i].cm,
+					name:     fmt.Sprintf("tile-%d", i),
+				}
+				// Pre-instantiate to get halo
+				if err := driver.init(ctx); err != nil {
+					cleanup()
+					return nil, err
+				}
+				tileDrivers = append(tileDrivers, driver)
+				i++
 			}
-			output = out
-			cur = curBytes
+			stages = append(stages, &qinternal.TileGroupStage{Drivers: tileDrivers})
 		}
 	}
 
-	return chainResult{
-		output: output,
-		metrics: chainMetrics{
-			moduleDurations:        moduleDurations,
-			instantiationDurations: instantiationDurations,
+	return &qinternal.Pipeline{
+		Stages: stages,
+		CloseFunc: func(closeCtx context.Context) error {
+			return runtime.Close(closeCtx)
 		},
 	}, nil
 }
 
-func formatOutputBytes(output contentData) ([]byte, error) {
-	switch output.encoding {
-	case dataEncodingRaw, dataEncodingUTF8:
-		return output.bytes, nil
+type wasmRunDriver struct {
+	runtime  wazero.Runtime
+	compiled wazero.CompiledModule
+	name     string
+	opts     options
+}
+
+func (d *wasmRunDriver) Execute(ctx context.Context, input qinternal.Content, requestID uint64) (qinternal.Content, error) {
+	inputBytes, err := qinternal.AsRawBytes(input)
+	if err != nil {
+		bmp, bmpErr := qinternal.ToBMPContent(input)
+		if bmpErr != nil {
+			return nil, err
+		}
+		inputBytes = bmp.RawBytes()
+	}
+
+	// Implementation of executeModuleWithInput logic adapted to Content
+	exec, err := executeModuleWithInput(ctx, d.runtime, d.compiled, inputBytes, d.opts, d.name)
+	if err != nil {
+		return nil, err
+	}
+
+	switch exec.output.encoding {
+	case dataEncodingUTF8:
+		return qinternal.NewStringContent(string(exec.output.bytes)), nil
 	case dataEncodingArrayI32:
-		count := len(output.bytes) / 4
+		return qinternal.NewI32ArrayContent(exec.output.bytes), nil
+	default:
+		// Check if it's a BMP
+		if w, h, err := qinternal.GetBMPDimensions(exec.output.bytes); err == nil {
+			return qinternal.NewBMPContent(exec.output.bytes, w, h), nil
+		}
+		return qinternal.NewRawBytesContent(exec.output.bytes), nil
+	}
+}
+
+func (d *wasmRunDriver) Close(ctx context.Context) error {
+	return d.compiled.Close(ctx)
+}
+
+type wasmTileModuleDriver struct {
+	runtime  wazero.Runtime
+	compiled wazero.CompiledModule
+	name     string
+
+	mod         api.Module
+	tileFunc    api.Function
+	uniformFunc api.Function
+	inputPtr    uint32
+	inputCap    uint64
+	haloPx      int
+}
+
+func (d *wasmTileModuleDriver) init(ctx context.Context) error {
+	mod, err := d.runtime.InstantiateModule(ctx, d.compiled, wazero.NewModuleConfig().WithName(d.name))
+	if err != nil {
+		return err
+	}
+	d.mod = mod
+
+	stage, err := loadTileStage(ctx, mod)
+	if err != nil {
+		mod.Close(ctx)
+		return err
+	}
+
+	d.tileFunc = stage.tileFunc
+	d.uniformFunc = stage.uniformFunc
+	d.inputPtr = stage.inputPtr
+	d.inputCap = stage.inputCap
+	if stage.haloFunc != nil {
+		values, err := stage.haloFunc.Call(ctx)
+		if err != nil {
+			mod.Close(ctx)
+			return wasmruntime.HumanizeExecutionError(ctx, err)
+		}
+		if len(values) > 0 {
+			d.haloPx = int(int32(values[0]))
+		}
+	}
+	if d.haloPx < 0 {
+		d.haloPx = 0
+	}
+	return nil
+}
+
+func (d *wasmTileModuleDriver) ExecuteTile(ctx context.Context, x, y float32, tilePixels []float32) ([]float32, error) {
+	// Convert float32 pixels to bytes for Wasm
+	pixelBytes := unsafe.Slice((*byte)(unsafe.Pointer(&tilePixels[0])), len(tilePixels)*4)
+	if uint64(len(pixelBytes)) > d.inputCap {
+		return nil, errors.New("tile too large for Wasm module capacity")
+	}
+
+	mem := d.mod.Memory()
+	if !mem.Write(d.inputPtr, pixelBytes) {
+		return nil, errors.New("failed to write tile to Wasm memory")
+	}
+
+	if _, err := d.tileFunc.Call(ctx, api.EncodeF32(x), api.EncodeF32(y)); err != nil {
+		return nil, wasmruntime.HumanizeExecutionError(ctx, err)
+	}
+
+	outBytes, ok := mem.Read(d.inputPtr, uint32(len(pixelBytes)))
+	if !ok {
+		return nil, errors.New("failed to read tile from Wasm memory")
+	}
+
+	// Copy back to float32 slice
+	outPixels := make([]float32, len(tilePixels))
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(&outPixels[0])), len(outPixels)*4), outBytes)
+	return outPixels, nil
+}
+
+func (d *wasmTileModuleDriver) Close(ctx context.Context) error {
+	if d.mod != nil {
+		d.mod.Close(ctx)
+	}
+	return d.compiled.Close(ctx)
+}
+
+func (d *wasmTileModuleDriver) HaloPx() int {
+	return d.haloPx
+}
+
+func (d *wasmTileModuleDriver) SetImageSize(ctx context.Context, width, height int) error {
+	if d.uniformFunc == nil {
+		return nil
+	}
+	if _, err := d.uniformFunc.Call(
+		ctx,
+		api.EncodeF32(float32(width)),
+		api.EncodeF32(float32(height)),
+	); err != nil {
+		return wasmruntime.HumanizeExecutionError(ctx, err)
+	}
+	return nil
+}
+
+func formatOutputBytes(output qinternal.Content) ([]byte, error) {
+	switch output.Encoding() {
+	case qinternal.EncodingRawBytes, qinternal.EncodingUTF8, qinternal.EncodingBMP:
+		return qinternal.AsRawBytes(output)
+	case qinternal.EncodingI32Array:
+		data, err := qinternal.AsRawBytes(output)
+		if err != nil {
+			return nil, err
+		}
+		count := len(data) / 4
 		var buf bytes.Buffer
 		buf.Grow(count * 9)
-		for i := range count {
-			v := binary.LittleEndian.Uint32(output.bytes[i*4:])
+		for i := 0; i < count; i++ {
+			v := binary.LittleEndian.Uint32(data[i*4:])
 			fmt.Fprintf(&buf, "%08x\n", v)
 		}
 		return buf.Bytes(), nil
@@ -3403,33 +3489,33 @@ func formatOutputBytes(output contentData) ([]byte, error) {
 	}
 }
 
-func isBMPBytes(data []byte) bool {
-	if len(data) < 18 {
-		return false
+func ensureRawContent(content qinternal.Content) (qinternal.Content, []byte, error) {
+	if data, err := qinternal.AsRawBytes(content); err == nil {
+		return content, data, nil
+	}
+
+	bmp, err := qinternal.ToBMPContent(content)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	data := bmp.RawBytes()
+	return bmp, data, nil
+}
+
+func getBMPDimensions(data []byte) (int, int, error) {
+	if len(data) < 26 {
+		return 0, 0, errors.New("BMP data too short")
 	}
 	if data[0] != 'B' || data[1] != 'M' {
-		return false
+		return 0, 0, errors.New("not a BMP file")
 	}
-
-	fileSize := binary.LittleEndian.Uint32(data[2:6])
-	if fileSize != 0 && fileSize > uint32(len(data)) {
-		return false
+	width := int(binary.LittleEndian.Uint32(data[18:22]))
+	height := int(int32(binary.LittleEndian.Uint32(data[22:26])))
+	if height < 0 {
+		height = -height
 	}
-
-	pixelOffset := binary.LittleEndian.Uint32(data[10:14])
-	if pixelOffset < 14 || pixelOffset > uint32(len(data)) {
-		return false
-	}
-
-	dibSize := binary.LittleEndian.Uint32(data[14:18])
-	if dibSize < 12 {
-		return false
-	}
-	if 14+dibSize > uint32(len(data)) {
-		return false
-	}
-
-	return true
+	return width, height, nil
 }
 
 func isICOBytes(data []byte) bool {
