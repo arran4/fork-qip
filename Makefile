@@ -1,4 +1,4 @@
-.PHONY: compliance examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test
+.PHONY: compliance examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test test-go
 
 default: qip compliance examples recipes
 
@@ -9,6 +9,7 @@ WASM_STACK_FLAG := -Wl,-z,stack-size=$(WASM_STACK_SIZE)
 ZIG_WASM_FLAGS := -target wasm32-freestanding -O ReleaseSmall -fno-entry -rdynamic
 GO_FIX_PKGS := ./cmd/... ./internal/... ./tools/...
 GO_FMT_PKGS := . ./cmd/... ./internal/... ./tools/...
+GO_TEST_PKGS := . ./cmd/... ./internal/... ./tools/...
 
 qip: main.go go.mod go.sum $(wildcard internal/*.go)
 	go fix $(GO_FIX_PKGS)
@@ -32,7 +33,7 @@ examples/sqlite-table-names.wasm: examples/sqlite-table-names.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_bytes_cap -Wl,--export=output_ptr -Wl,--export=output_utf8_cap -Oz -o $@
 
 examples/text-to-bmp.wasm: examples/text-to-bmp.c
-	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=uniform_set_leading -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
+	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=uniform_set_leading -Wl,--export=uniform_set_cols -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
 
 examples/bmp-double.wasm: examples/bmp-double.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_bytes_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
@@ -79,7 +80,7 @@ recipes: recipes/text/markdown/10-markdown-basic.wasm recipes/text/markdown/20-h
 
 examples: examples-wat-wasm examples-c-wasm examples-zig-wasm
 
-test: qip examples test-zig test-snapshot
+test: qip examples test-go test-zig test-snapshot
 	diff test/expected.txt test/latest.txt && echo "Snapshots pass."
 
 test-snapshot: qip examples
@@ -158,6 +159,9 @@ test-zig: $(ZIG_TEST_FILES)
 		echo "zig test $$f"; \
 		$(ZIG_ENV) zig test $$f; \
 	done
+
+test-go:
+	go test $(GO_TEST_PKGS)
 
 defluff:
 	find . -name '.DS_Store' -type f -delete
