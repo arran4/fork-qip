@@ -56,9 +56,10 @@ Capacity units:
 ## Memory Layout Recommendations
 
 - Keep input and output buffers disjoint.
-- Clamp `input_size` in your module to avoid out-of-bounds when host and module assumptions drift.
+- Validate `input_size` and trap on out-of-bounds assumptions drifting between host and module.
 - Reserve explicit scratch space if needed.
-- Return `0` on invalid/empty output when that fits your module semantics.
+- Preferred for data-preserving transforms: trap on invalid input/overflow so bad data does not silently become empty output.
+- Use `return 0` only when empty output is an intentional, non-error result.
 
 ## Image Mode Memory
 
@@ -85,4 +86,4 @@ See also: `IMAGE.md`.
 
 - Verify your exported caps match actual writable memory.
 - Test both normal and oversized input.
-- Check module behavior when `run` returns 0.
+- Check module trap behavior for malformed/oversized input.

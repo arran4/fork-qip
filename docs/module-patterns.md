@@ -2,7 +2,8 @@
 
 This is a practical cookbook for writing `qip` modules.
 
-It also includes the error semantics you need when deciding whether to return a value, return empty output, or trap.
+It also includes the error semantics for deciding whether to return a value, return empty output, or trap.
+Default recommendation: trap on invalid input or overflow for transformation modules.
 
 ## Choose A Pattern
 
@@ -12,8 +13,8 @@ Use this quick mapping:
 - Normalize text: UTF-8 input/output buffers.
 - Transform binary: bytes input/output buffers.
 - Emit numeric rows: `output_i32_cap`.
-- Hard reject invalid input: trap.
-- Soft reject invalid input: return `0` output length (or a sentinel scalar value).
+- Preferred: hard reject invalid input/overflow with trap.
+- Optional: soft reject invalid input by returning `0` output length (or a sentinel scalar value) when empty output is explicitly meaningful.
 
 ## Pattern 1: Scalar Validator (No Output Buffer)
 
@@ -155,7 +156,7 @@ WAT:
 
 ### Soft Failure (Module-side)
 
-Use return values to signal non-fatal failure.
+Use return values to signal non-fatal failure when that behavior is intentional.
 
 Common options:
 
@@ -173,11 +174,14 @@ If output buffers are exported and `run` returns `0`, output is empty.
 
 ### Choosing Trap vs Soft Failure
 
+Default to trap, especially for normalizers/transformers where silent drops risk data loss.
+
 Prefer trap when:
 
 - input is malformed and should abort the pipeline
 - a safety invariant is violated
 - partial output would be misleading
+- preserving source data is more important than availability
 
 Prefer soft failure when:
 

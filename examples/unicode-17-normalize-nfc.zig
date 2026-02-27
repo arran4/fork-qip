@@ -1,4 +1,4 @@
-// Normalize UTF-8 input to NFC. Returns 0 on invalid/overflow.
+// Normalize UTF-8 input to NFC. Traps on invalid input or overflow.
 
 const std = @import("std");
 
@@ -305,20 +305,20 @@ fn writeUtf8(cp: u32, out: []u8, out_len: *usize) bool {
 }
 
 export fn run(input_size_in: u32) u32 {
-    var input_size: usize = input_size_in;
-    if (input_size > INPUT_CAP) input_size = INPUT_CAP;
+    const input_size: usize = input_size_in;
+    if (input_size > INPUT_CAP) @trap();
     const input = input_buf[0..input_size];
 
     var decomp_len: usize = 0;
     var idx: usize = 0;
     while (idx < input.len) {
         const cp = decodeUtf8(input, &idx).?;
-        if (!decompose(cp, tmp_a[0..], &decomp_len)) return 0;
+        if (!decompose(cp, tmp_a[0..], &decomp_len)) @trap();
     }
 
     reorderCanonical(tmp_a[0..decomp_len], decomp_len);
 
-    const comp_len = composeNFC(tmp_a[0..decomp_len], decomp_len, tmp_b[0..]) orelse return 0;
+    const comp_len = composeNFC(tmp_a[0..decomp_len], decomp_len, tmp_b[0..]) orelse @trap();
 
     var out_len: usize = 0;
     var i: usize = 0;
