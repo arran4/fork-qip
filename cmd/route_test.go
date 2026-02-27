@@ -13,9 +13,9 @@ import (
 )
 
 func TestNormalizeRouteWarcArgs(t *testing.T) {
-	in := []string{"docs/", "--recipes", "recipes/", "--host", "example.com", "-X", "HEAD", "-o", "out.warc"}
+	in := []string{"docs/", "--recipes", "recipes/", "--host", "example.com", "-o", "out.warc"}
 	got := normalizeRouteWarcArgs(in)
-	want := []string{"--recipes", "recipes/", "--host", "example.com", "-X", "HEAD", "-o", "out.warc", "docs/"}
+	want := []string{"--recipes", "recipes/", "--host", "example.com", "-o", "out.warc", "docs/"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%v, want %v", got, want)
 	}
@@ -123,6 +123,36 @@ func TestRunRouteWARCRejectsInvalidHost(t *testing.T) {
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid host") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunRouteWARCRejectsMethodFlags(t *testing.T) {
+	err := RunRoute([]string{"warc", "-X", "HEAD", "docs"}, RouteConfig{
+		UsageRoute:     "usage route",
+		UsageRouteWarc: "usage route warc",
+		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
+			return []string{"/a"}, nil
+		},
+		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			return qinternal.InProcessHTTPResponse{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -X") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	err = RunRoute([]string{"warc", "--method", "HEAD", "docs"}, RouteConfig{
+		UsageRoute:     "usage route",
+		UsageRouteWarc: "usage route warc",
+		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
+			return []string{"/a"}, nil
+		},
+		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			return qinternal.InProcessHTTPResponse{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -method") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

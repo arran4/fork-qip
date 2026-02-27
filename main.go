@@ -100,7 +100,7 @@ const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  get 
 const usageRouteGet = "Usage: qip route get <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteHead = "Usage: qip route head <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteList = "Usage: qip route list <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
-const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [--host <host>] [-X <GET|HEAD>] [-o <warc file or ->] [-v|--verbose]"
+const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [--host <host>] [-o <warc file or ->] [-v|--verbose]"
 const usageForm = "Usage: qip form [-v|--verbose] <wasm module URL or file>"
 const usageHelp = "Usage: qip help [command]"
 
@@ -2404,7 +2404,7 @@ func routeCmd(args []string) {
 			if err != nil {
 				return qinternal.InProcessHTTPResponse{}, err
 			}
-			return qinternal.ServeInProcessHTTP(loaded.handler, request.Method, request.RequestPath, nil)
+			return qinternal.ServeInProcessHTTP(loaded.handler, http.MethodGet, request.RequestPath, nil)
 		},
 		Verbosef: func(format string, args ...any) {
 			log.Printf(format, args...)

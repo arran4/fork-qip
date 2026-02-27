@@ -25,7 +25,6 @@ type RouteWARCRequest struct {
 	RecipesRoot string
 	FormsRoot   string
 	ModeRaw     string
-	Method      string
 	Host        string
 	Verbose     bool
 	OutputPath  string
@@ -74,7 +73,6 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	var recipesRoot string
 	var formsRoot string
 	var modeRaw string
-	var methodRaw string
 	hostRaw := "qip.local"
 	outputPath := "-"
 
@@ -87,18 +85,12 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	fs.StringVar(&formsRoot, "forms", "", "form modules root directory")
 	fs.StringVar(&modeRaw, "mode", config.DefaultMode, "runtime mode")
 	fs.StringVar(&hostRaw, "host", hostRaw, "WARC-Target-URI host")
-	fs.StringVar(&methodRaw, "X", http.MethodGet, "request method (GET or HEAD)")
-	fs.StringVar(&methodRaw, "method", http.MethodGet, "request method (GET or HEAD)")
 	fs.StringVar(&outputPath, "o", "-", "output WARC path ('-' for stdout)")
 	fs.StringVar(&outputPath, "output", "-", "output WARC path ('-' for stdout)")
 	if err := fs.Parse(normalizeRouteWarcArgs(args)); err != nil {
 		return fmt.Errorf("%s %w", config.UsageRouteWarc, err)
 	}
 
-	method, err := parseRouteMethod(methodRaw)
-	if err != nil {
-		return err
-	}
 	host, err := parseRouteWARCHost(hostRaw)
 	if err != nil {
 		return err
@@ -115,7 +107,6 @@ func runRouteWARC(args []string, config RouteConfig) error {
 		RecipesRoot: recipesRoot,
 		FormsRoot:   formsRoot,
 		ModeRaw:     modeRaw,
-		Method:      method,
 		Host:        host,
 		Verbose:     verbose,
 		OutputPath:  outputPath,
@@ -162,19 +153,9 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	}
 
 	if verbose && config.Verbosef != nil {
-		config.Verbosef("route warc: method=%s host=%s paths=%d bytes=%d output=%s", method, host, len(paths), warcBytes.Len(), outputPath)
+		config.Verbosef("route warc: host=%s paths=%d bytes=%d output=%s", host, len(paths), warcBytes.Len(), outputPath)
 	}
 	return nil
-}
-
-func parseRouteMethod(raw string) (string, error) {
-	method := strings.ToUpper(strings.TrimSpace(raw))
-	switch method {
-	case http.MethodGet, http.MethodHead:
-		return method, nil
-	default:
-		return "", fmt.Errorf("invalid method %q (expected GET or HEAD)", raw)
-	}
 }
 
 func parseRouteWARCHost(raw string) (string, error) {
@@ -198,8 +179,6 @@ func normalizeRouteWarcArgs(args []string) []string {
 		"--forms":   {},
 		"--mode":    {},
 		"--host":    {},
-		"-X":        {},
-		"--method":  {},
 		"-o":        {},
 		"--output":  {},
 	}
