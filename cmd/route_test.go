@@ -13,9 +13,9 @@ import (
 )
 
 func TestNormalizeRouteWarcArgs(t *testing.T) {
-	in := []string{"docs/", "--recipes", "recipes/", "-X", "HEAD", "-o", "out.warc"}
+	in := []string{"docs/", "--recipes", "recipes/", "--host", "example.com", "-X", "HEAD", "-o", "out.warc"}
 	got := normalizeRouteWarcArgs(in)
-	want := []string{"--recipes", "recipes/", "-X", "HEAD", "-o", "out.warc", "docs/"}
+	want := []string{"--recipes", "recipes/", "--host", "example.com", "-X", "HEAD", "-o", "out.warc", "docs/"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%v, want %v", got, want)
 	}
@@ -78,6 +78,51 @@ func TestRunRouteWARCNoPaths(t *testing.T) {
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "no route paths found to archive") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunRouteWARCCustomHost(t *testing.T) {
+	var out bytes.Buffer
+	err := RunRoute([]string{"warc", "--host", "example.com", "docs"}, RouteConfig{
+		UsageRoute:     "usage route",
+		UsageRouteWarc: "usage route warc",
+		DefaultMode:    "dev",
+		Stdout:         &out,
+		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
+			if request.Host != "example.com" {
+				t.Fatalf("host=%q, want example.com", request.Host)
+			}
+			return []string{"/a"}, nil
+		},
+		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			return qinternal.InProcessHTTPResponse{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/plain"}},
+				Body:       []byte("ok"),
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunRoute: %v", err)
+	}
+	if !strings.Contains(out.String(), "WARC-Target-URI: http://example.com/a\r\n") {
+		t.Fatalf("missing custom-host URI")
+	}
+}
+
+func TestRunRouteWARCRejectsInvalidHost(t *testing.T) {
+	err := RunRoute([]string{"warc", "--host", "https://example.com", "docs"}, RouteConfig{
+		UsageRoute:     "usage route",
+		UsageRouteWarc: "usage route warc",
+		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
+			return []string{"/a"}, nil
+		},
+		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			return qinternal.InProcessHTTPResponse{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid host") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

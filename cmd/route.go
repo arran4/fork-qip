@@ -26,6 +26,7 @@ type RouteWARCRequest struct {
 	FormsRoot   string
 	ModeRaw     string
 	Method      string
+	Host        string
 	Verbose     bool
 	OutputPath  string
 }
@@ -74,6 +75,7 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	var formsRoot string
 	var modeRaw string
 	var methodRaw string
+	hostRaw := "qip.local"
 	outputPath := "-"
 
 	fs := flag.NewFlagSet("route warc", flag.ContinueOnError)
@@ -84,6 +86,7 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	fs.StringVar(&recipesRoot, "recipes", "", "recipe modules root directory")
 	fs.StringVar(&formsRoot, "forms", "", "form modules root directory")
 	fs.StringVar(&modeRaw, "mode", config.DefaultMode, "runtime mode")
+	fs.StringVar(&hostRaw, "host", hostRaw, "WARC-Target-URI host")
 	fs.StringVar(&methodRaw, "X", http.MethodGet, "request method (GET or HEAD)")
 	fs.StringVar(&methodRaw, "method", http.MethodGet, "request method (GET or HEAD)")
 	fs.StringVar(&outputPath, "o", "-", "output WARC path ('-' for stdout)")
@@ -93,6 +96,10 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	}
 
 	method, err := parseRouteMethod(methodRaw)
+	if err != nil {
+		return err
+	}
+	host, err := parseRouteWARCHost(hostRaw)
 	if err != nil {
 		return err
 	}
@@ -109,6 +116,7 @@ func runRouteWARC(args []string, config RouteConfig) error {
 		FormsRoot:   formsRoot,
 		ModeRaw:     modeRaw,
 		Method:      method,
+		Host:        host,
 		Verbose:     verbose,
 		OutputPath:  outputPath,
 	}
@@ -132,9 +140,9 @@ func runRouteWARC(args []string, config RouteConfig) error {
 			return fmt.Errorf("failed to resolve path %q: %w", requestPath, err)
 		}
 
-		requestURI := "http://qip.local" + requestPath
+		requestURI := "http://" + host + requestPath
 		if !strings.HasPrefix(requestPath, "/") {
-			requestURI = "http://qip.local/" + requestPath
+			requestURI = "http://" + host + "/" + requestPath
 		}
 		record, err := buildMinimalWARCResponseRecord(requestURI, response)
 		if err != nil {
@@ -154,7 +162,7 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	}
 
 	if verbose && config.Verbosef != nil {
-		config.Verbosef("route warc: method=%s paths=%d bytes=%d output=%s", method, len(paths), warcBytes.Len(), outputPath)
+		config.Verbosef("route warc: method=%s host=%s paths=%d bytes=%d output=%s", method, host, len(paths), warcBytes.Len(), outputPath)
 	}
 	return nil
 }
@@ -169,6 +177,17 @@ func parseRouteMethod(raw string) (string, error) {
 	}
 }
 
+func parseRouteWARCHost(raw string) (string, error) {
+	host := strings.TrimSpace(raw)
+	if host == "" {
+		return "", errors.New("host must not be empty")
+	}
+	if strings.Contains(host, "://") || strings.Contains(host, "/") {
+		return "", fmt.Errorf("invalid host %q", raw)
+	}
+	return host, nil
+}
+
 func normalizeRouteWarcArgs(args []string) []string {
 	if len(args) == 0 {
 		return args
@@ -178,6 +197,7 @@ func normalizeRouteWarcArgs(args []string) []string {
 		"--recipes": {},
 		"--forms":   {},
 		"--mode":    {},
+		"--host":    {},
 		"-X":        {},
 		"--method":  {},
 		"-o":        {},
