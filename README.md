@@ -183,7 +183,7 @@ qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/col
 ## Documentation
 
 - [Comply Command](docs/comply.md)
-- [Module Memory Guide](docs/module-memory.md)
+- [Module Contract Guide](docs/module-contract.md)
 - [Module Patterns (including error semantics)](docs/module-patterns.md)
 - [Security Model](docs/security-model.md)
 
@@ -424,7 +424,7 @@ The contract looks like:
 
 The run-module contract (caps, output semantics, and optional content type metadata) is documented in:
 
-- [`docs/module-memory.md`](./docs/module-memory.md#webassembly-module-contract)
+- [`docs/module-contract.md`](./docs/module-contract.md#webassembly-module-contract)
 
 ## Building the site
 

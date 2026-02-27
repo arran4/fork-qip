@@ -1,4 +1,4 @@
-# Module Memory Guide
+# Module Contract Guide
 
 This guide documents the contract `qip` expects for modules, and how it passes input in and reads output back.
 
