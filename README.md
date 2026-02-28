@@ -176,6 +176,7 @@ qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/col
 - [ ] Add `qip serve` command that runs the server in `prod` mode by default, and includes a module upload endpoint.
 - [ ] Add `random_ptr` and `random_size` to modules that the host can detect and fill in with random data. It can choose to seed with determinism or use a cryptographic source of randomness — it’s up to the host.
 - [ ] Add `--postcondition` or `--outmust` flag to `qip run` that verifies the final output conforms to a particular module e.g. `--postcondition valid-xml-1.0.wasm`.
+- [ ] Add first-stage content-type guards: either lightweight ingress sniffing (check initial bytes against expected type) or validator modules (for example `validate-html.wasm`) that accept untrusted input and re-emit it with asserted MIME type on success.
 - [ ] Add `qip photocopy` command that observes an existing tool’s input/output behavior and generates a behaviorally similar QIP module implementation in wasm, then validates it with duel/fuzz tests and reports divergences.
 
 ## Documentation
@@ -427,5 +428,5 @@ The run-module contract (caps, output semantics, and optional content type metad
 ## Building the site
 
 ```sh
-go install github.com/royalicing/qip@latest && qip route warc ./site --recipes recipes --forms examples | qip run examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir site-static && tar -xvf site-static.tar -C site-static
+go install github.com/royalicing/qip@latest && make site-static
 ```

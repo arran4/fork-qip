@@ -85,9 +85,18 @@ const (
 	modeProd runtimeMode = "prod"
 )
 
+type contentTypeCheckingMode uint8
+
+const (
+	ContentTypeCheckingStrong contentTypeCheckingMode = iota
+	ContentTypeCheckingNone
+)
+
 type options struct {
-	verbose bool
-	mode    runtimeMode
+	verbose                bool
+	mode                   runtimeMode
+	contentTypeChecking    contentTypeCheckingMode
+	trustFirstStageContent bool
 }
 
 const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  route    Resolve routed paths and export route artifacts\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
@@ -220,7 +229,10 @@ func readModulePath(path string, opts options) ([]byte, error) {
 }
 
 func runCmd(args []string) {
-	opts := options{}
+	opts := options{
+		contentTypeChecking:    ContentTypeCheckingStrong,
+		trustFirstStageContent: true,
+	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var runVerbose bool
@@ -296,7 +308,7 @@ func runCmd(args []string) {
 	execCtx, cancel := wasmruntime.WithExecutionTimeout(execCtx, time.Duration(timeoutMS)*time.Millisecond)
 	defer cancel()
 
-	initialContent := qinternal.NewRawBytesContent(input)
+	initialContent := qinternal.NewRawBytesContentWithType(input, "")
 	result, err := pipeline.Process(execCtx, initialContent, 0)
 	if err != nil {
 		gameOver("%v", err)
@@ -374,7 +386,10 @@ type benchSummary struct {
 }
 
 func benchCmd(args []string) {
-	opts := options{}
+	opts := options{
+		contentTypeChecking:    ContentTypeCheckingStrong,
+		trustFirstStageContent: true,
+	}
 	fs := flag.NewFlagSet("bench", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
@@ -614,7 +629,7 @@ func runBenchSample(
 	}
 	defer cancel()
 
-	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName, nil)
+	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName, nil, "", opts.trustFirstStageContent)
 	if err != nil {
 		return benchSample{}, contentData{}, err
 	}
@@ -1489,7 +1504,9 @@ func encodeBMP(img *image.RGBA) ([]byte, error) {
 }
 
 func imageCmd(args []string) {
-	opts := options{}
+	opts := options{
+		contentTypeChecking: ContentTypeCheckingNone,
+	}
 	var inputImagePath string
 	var outputImagePath string
 	timeoutMS := 4000
@@ -1627,25 +1644,109 @@ func getExportedValue(ctx context.Context, mod api.Module, name string) (uint64,
 	return 0, false, nil
 }
 
+func normalizeIncomingContentType(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err == nil && mediaType != "" {
+		return strings.ToLower(mediaType)
+	}
+	if cut := strings.IndexByte(value, ';'); cut != -1 {
+		value = strings.TrimSpace(value[:cut])
+	}
+	return strings.ToLower(value)
+}
+
+func normalizeDeclaredContentType(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("content type is empty")
+	}
+	if strings.Contains(value, ",") {
+		return "", errors.New("content type must contain exactly one MIME type")
+	}
+	mediaType, params, err := mime.ParseMediaType(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid content type %q: %w", value, err)
+	}
+	if mediaType == "" {
+		return "", errors.New("content type is empty")
+	}
+	if len(params) > 0 {
+		return "", fmt.Errorf("content type %q must not include parameters", value)
+	}
+	if strings.Contains(mediaType, "*") {
+		return "", fmt.Errorf("content type %q must not include media ranges", value)
+	}
+	return strings.ToLower(mediaType), nil
+}
+
+func readOptionalModuleContentType(ctx context.Context, mod api.Module, prefix string) (string, bool, error) {
+	ptrName := prefix + "_content_type_ptr"
+	sizeName := prefix + "_content_type_size"
+
+	ptr, hasPtr, err := getExportedValue(ctx, mod, ptrName)
+	if err != nil {
+		return "", false, wasmruntime.HumanizeExecutionError(ctx, err)
+	}
+	size, hasSize, err := getExportedValue(ctx, mod, sizeName)
+	if err != nil {
+		return "", false, wasmruntime.HumanizeExecutionError(ctx, err)
+	}
+	if hasPtr != hasSize {
+		return "", false, fmt.Errorf("module must export both %s and %s together", ptrName, sizeName)
+	}
+	if !hasPtr {
+		return "", false, nil
+	}
+	if size == 0 {
+		return "", false, fmt.Errorf("module export %s must be non-empty when present", sizeName)
+	}
+
+	mem := mod.Memory()
+	raw, ok := mem.Read(uint32(ptr), uint32(size))
+	if !ok {
+		return "", false, fmt.Errorf("failed to read %s bytes from module memory", prefix)
+	}
+	mediaType, err := normalizeDeclaredContentType(string(raw))
+	if err != nil {
+		return "", false, fmt.Errorf("invalid %s content type metadata: %w", prefix, err)
+	}
+	return mediaType, true, nil
+}
+
 type moduleExecutionResult struct {
-	output         contentData
-	instantiation  time.Duration
-	run            time.Duration
-	total          time.Duration
-	memoryBytes    uint64
-	inputCapBytes  uint64
-	outputCapBytes uint64
+	output            contentData
+	outputContentType string
+	instantiation     time.Duration
+	run               time.Duration
+	total             time.Duration
+	memoryBytes       uint64
+	inputCapBytes     uint64
+	outputCapBytes    uint64
 }
 
 func runModuleWithInput(ctx context.Context, runtime wazero.Runtime, compiled wazero.CompiledModule, inputBytes []byte, opts options, moduleName string) (output contentData, instantiation time.Duration, returnErr error) {
-	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName, nil)
+	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName, nil, "", opts.trustFirstStageContent)
 	if err != nil {
 		return contentData{}, 0, err
 	}
 	return exec.output, exec.instantiation, nil
 }
 
-func executeModuleWithInput(ctx context.Context, runtime wazero.Runtime, compiled wazero.CompiledModule, inputBytes []byte, opts options, moduleName string, uniforms map[string]string) (exec moduleExecutionResult, returnErr error) {
+func executeModuleWithInput(
+	ctx context.Context,
+	runtime wazero.Runtime,
+	compiled wazero.CompiledModule,
+	inputBytes []byte,
+	opts options,
+	moduleName string,
+	uniforms map[string]string,
+	incomingContentType string,
+	allowMissingInputContentType bool,
+) (exec moduleExecutionResult, returnErr error) {
 	totalStart := time.Now()
 	defer func() {
 		exec.total = time.Since(totalStart)
@@ -1727,6 +1828,43 @@ func executeModuleWithInput(ctx context.Context, runtime wazero.Runtime, compile
 		}
 	}
 	exec.outputCapBytes = uint64(outputCap)
+
+	declaredInputContentType, hasDeclaredInputContentType, err := readOptionalModuleContentType(ctx, mod, "input")
+	if err != nil {
+		returnErr = err
+		return
+	}
+	declaredOutputContentType, hasDeclaredOutputContentType, err := readOptionalModuleContentType(ctx, mod, "output")
+	if err != nil {
+		returnErr = err
+		return
+	}
+	incomingContentType = normalizeIncomingContentType(incomingContentType)
+	effectiveIncomingContentType := incomingContentType
+	if effectiveIncomingContentType == "" && hasDeclaredInputContentType && allowMissingInputContentType {
+		effectiveIncomingContentType = declaredInputContentType
+	}
+
+	if opts.contentTypeChecking == ContentTypeCheckingStrong && hasDeclaredInputContentType {
+		if effectiveIncomingContentType == "" {
+			if !allowMissingInputContentType {
+				returnErr = fmt.Errorf("content type check failed for %s: module expects %q but pipeline content type is unspecified", moduleName, declaredInputContentType)
+				return
+			}
+		} else if effectiveIncomingContentType != declaredInputContentType {
+			returnErr = fmt.Errorf("content type check failed for %s: module expects %q, got %q", moduleName, declaredInputContentType, effectiveIncomingContentType)
+			return
+		}
+	}
+
+	switch {
+	case hasDeclaredOutputContentType:
+		exec.outputContentType = declaredOutputContentType
+	case exec.output.encoding == dataEncodingUTF8 || exec.output.encoding == dataEncodingRaw:
+		exec.outputContentType = effectiveIncomingContentType
+	default:
+		exec.outputContentType = ""
+	}
 
 	runFunc := mod.ExportedFunction("run")
 	if runFunc == nil {
@@ -1838,7 +1976,9 @@ type devRuntimeState struct {
 }
 
 func devCmd(args []string) {
-	opts := options{}
+	opts := options{
+		contentTypeChecking: ContentTypeCheckingStrong,
+	}
 	var recipesRoot string
 	var formsRoot string
 	var modeRaw string
@@ -2026,7 +2166,9 @@ func devCmd(args []string) {
 }
 
 func routePathCmd(args []string, method string, usage string, logPrefix string) {
-	opts := options{}
+	opts := options{
+		contentTypeChecking: ContentTypeCheckingStrong,
+	}
 	var recipesRoot string
 	var formsRoot string
 	var modeRaw string
@@ -2148,7 +2290,9 @@ type routeListEntry struct {
 }
 
 func routeListCmd(args []string) {
-	opts := options{}
+	opts := options{
+		contentTypeChecking: ContentTypeCheckingStrong,
+	}
 	var recipesRoot string
 	var formsRoot string
 	var modeRaw string
@@ -2320,8 +2464,9 @@ func routeCmd(args []string) {
 			return nil, err
 		}
 		opts := options{
-			verbose: request.Verbose,
-			mode:    mode,
+			verbose:             request.Verbose,
+			mode:                mode,
+			contentTypeChecking: ContentTypeCheckingStrong,
 		}
 
 		contentInfo, err := os.Stat(request.ContentRoot)
@@ -2451,7 +2596,7 @@ func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRu
 			}
 			sourceDigest := sha256.Sum256(inputBytes)
 
-			var result qinternal.Content = qinternal.NewRawBytesContent(inputBytes)
+			var result qinternal.Content = qinternal.NewRawBytesContentWithType(inputBytes, route.SourceMIME)
 			hasRecipes := current.recipeChains[route.SourceMIME] != nil
 			if hasRecipes {
 				pipeline := current.recipeChains[route.SourceMIME]
@@ -3312,11 +3457,12 @@ func buildPipelineFromSpecs(ctx context.Context, specs []moduleSpec, opts option
 		info := infos[i]
 		if info.kind == stageKindRun {
 			driver := &wasmRunDriver{
-				runtime:  runtime,
-				compiled: info.cm,
-				name:     fmt.Sprintf("stage-%d", i),
-				opts:     opts,
-				uniforms: info.uniforms,
+				runtime:                      runtime,
+				compiled:                     info.cm,
+				name:                         fmt.Sprintf("stage-%d", i),
+				opts:                         opts,
+				uniforms:                     info.uniforms,
+				allowMissingInputContentType: opts.trustFirstStageContent && i == 0,
 			}
 			stages = append(stages, &qinternal.RunStage{Driver: driver})
 			i++
@@ -3351,11 +3497,12 @@ func buildPipelineFromSpecs(ctx context.Context, specs []moduleSpec, opts option
 }
 
 type wasmRunDriver struct {
-	runtime  wazero.Runtime
-	compiled wazero.CompiledModule
-	name     string
-	opts     options
-	uniforms map[string]string
+	runtime                      wazero.Runtime
+	compiled                     wazero.CompiledModule
+	name                         string
+	opts                         options
+	uniforms                     map[string]string
+	allowMissingInputContentType bool
 }
 
 func (d *wasmRunDriver) Execute(ctx context.Context, input qinternal.Content, requestID uint64) (qinternal.Content, error) {
@@ -3369,22 +3516,32 @@ func (d *wasmRunDriver) Execute(ctx context.Context, input qinternal.Content, re
 	}
 
 	// Implementation of executeModuleWithInput logic adapted to Content
-	exec, err := executeModuleWithInput(ctx, d.runtime, d.compiled, inputBytes, d.opts, d.name, d.uniforms)
+	exec, err := executeModuleWithInput(
+		ctx,
+		d.runtime,
+		d.compiled,
+		inputBytes,
+		d.opts,
+		d.name,
+		d.uniforms,
+		qinternal.ContentTypeOf(input),
+		d.allowMissingInputContentType,
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	switch exec.output.encoding {
 	case dataEncodingUTF8:
-		return qinternal.NewStringContent(string(exec.output.bytes)), nil
+		return qinternal.NewStringContentWithType(string(exec.output.bytes), exec.outputContentType), nil
 	case dataEncodingArrayI32:
-		return qinternal.NewI32ArrayContent(exec.output.bytes), nil
+		return qinternal.NewI32ArrayContentWithType(exec.output.bytes, exec.outputContentType), nil
 	default:
 		// Check if it's a BMP
 		if w, h, err := qinternal.GetBMPDimensions(exec.output.bytes); err == nil {
-			return qinternal.NewBMPContent(exec.output.bytes, w, h), nil
+			return qinternal.NewBMPContentWithType(exec.output.bytes, w, h, exec.outputContentType), nil
 		}
-		return qinternal.NewRawBytesContent(exec.output.bytes), nil
+		return qinternal.NewRawBytesContentWithType(exec.output.bytes, exec.outputContentType), nil
 	}
 }
 

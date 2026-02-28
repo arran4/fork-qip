@@ -204,6 +204,121 @@ type I32ArrayContent interface {
 	RawBytes() []byte // Still stored as bytes for WASM memory compatibility
 }
 
+type contentTypeWrapper interface {
+	Content
+	unwrapContent() Content
+}
+
+type rawBytesWithContentType struct {
+	RawBytesContent
+	contentType string
+}
+
+func (c *rawBytesWithContentType) ContentType() string { return c.contentType }
+func (c *rawBytesWithContentType) unwrapContent() Content {
+	return c.RawBytesContent
+}
+
+type stringWithContentType struct {
+	StringContent
+	contentType string
+}
+
+func (c *stringWithContentType) ContentType() string { return c.contentType }
+func (c *stringWithContentType) unwrapContent() Content {
+	return c.StringContent
+}
+
+type bmpWithContentType struct {
+	BMPContent
+	contentType string
+}
+
+func (c *bmpWithContentType) ContentType() string { return c.contentType }
+func (c *bmpWithContentType) unwrapContent() Content {
+	return c.BMPContent
+}
+
+type rgbaf32WithContentType struct {
+	RGBAF32Content
+	contentType string
+}
+
+func (c *rgbaf32WithContentType) ContentType() string { return c.contentType }
+func (c *rgbaf32WithContentType) unwrapContent() Content {
+	return c.RGBAF32Content
+}
+
+type i32ArrayWithContentType struct {
+	I32ArrayContent
+	contentType string
+}
+
+func (c *i32ArrayWithContentType) ContentType() string { return c.contentType }
+func (c *i32ArrayWithContentType) unwrapContent() Content {
+	return c.I32ArrayContent
+}
+
+type contentWithContentType struct {
+	Content
+	contentType string
+}
+
+func (c *contentWithContentType) ContentType() string { return c.contentType }
+func (c *contentWithContentType) unwrapContent() Content {
+	return c.Content
+}
+
+type contentTypeCarrier interface {
+	ContentType() string
+}
+
+func ContentTypeOf(content Content) string {
+	if content == nil {
+		return ""
+	}
+	if carrier, ok := content.(contentTypeCarrier); ok {
+		return carrier.ContentType()
+	}
+	return ""
+}
+
+func unwrapContent(content Content) Content {
+	cur := content
+	for {
+		wrapped, ok := cur.(contentTypeWrapper)
+		if !ok {
+			return cur
+		}
+		cur = wrapped.unwrapContent()
+	}
+}
+
+func WithContentType(content Content, contentType string) Content {
+	if content == nil {
+		return nil
+	}
+	base := unwrapContent(content)
+	if contentType == "" {
+		return base
+	}
+
+	switch c := base.(type) {
+	case BMPContent:
+		return &bmpWithContentType{BMPContent: c, contentType: contentType}
+	case RGBAF32Content:
+		return &rgbaf32WithContentType{RGBAF32Content: c, contentType: contentType}
+	case StringContent:
+		return &stringWithContentType{StringContent: c, contentType: contentType}
+	case I32ArrayContent:
+		return &i32ArrayWithContentType{I32ArrayContent: c, contentType: contentType}
+	case RawBytesContent:
+		return &rawBytesWithContentType{RawBytesContent: c, contentType: contentType}
+	default:
+		return &contentWithContentType{Content: c, contentType: contentType}
+	}
+}
+
 // --- Implementations ---
 
 type rawBytesContent struct {
@@ -217,6 +332,14 @@ func NewRawBytesContent(data []byte) RawBytesContent {
 	return &rawBytesContent{data: data}
 }
 
+func NewRawBytesContentWithType(data []byte, contentType string) RawBytesContent {
+	content := WithContentType(NewRawBytesContent(data), contentType)
+	if wrapped, ok := content.(RawBytesContent); ok {
+		return wrapped
+	}
+	return NewRawBytesContent(data)
+}
+
 type stringContent struct {
 	data string
 }
@@ -226,6 +349,14 @@ func (c *stringContent) String() string     { return c.data }
 
 func NewStringContent(data string) StringContent {
 	return &stringContent{data: data}
+}
+
+func NewStringContentWithType(data string, contentType string) StringContent {
+	content := WithContentType(NewStringContent(data), contentType)
+	if wrapped, ok := content.(StringContent); ok {
+		return wrapped
+	}
+	return NewStringContent(data)
 }
 
 type bmpContent struct {
@@ -242,6 +373,14 @@ func NewBMPContent(data []byte, width, height int) BMPContent {
 	return &bmpContent{data: data, width: width, height: height}
 }
 
+func NewBMPContentWithType(data []byte, width, height int, contentType string) BMPContent {
+	content := WithContentType(NewBMPContent(data, width, height), contentType)
+	if wrapped, ok := content.(BMPContent); ok {
+		return wrapped
+	}
+	return NewBMPContent(data, width, height)
+}
+
 type rgbaf32Content struct {
 	pixels        []float32
 	width, height int
@@ -256,6 +395,14 @@ func NewRGBAF32Content(pixels []float32, width, height int) RGBAF32Content {
 	return &rgbaf32Content{pixels: pixels, width: width, height: height}
 }
 
+func NewRGBAF32ContentWithType(pixels []float32, width, height int, contentType string) RGBAF32Content {
+	content := WithContentType(NewRGBAF32Content(pixels, width, height), contentType)
+	if wrapped, ok := content.(RGBAF32Content); ok {
+		return wrapped
+	}
+	return NewRGBAF32Content(pixels, width, height)
+}
+
 type i32ArrayContent struct {
 	data []byte
 }
@@ -265,6 +412,14 @@ func (c *i32ArrayContent) RawBytes() []byte   { return c.data }
 
 func NewI32ArrayContent(data []byte) I32ArrayContent {
 	return &i32ArrayContent{data: data}
+}
+
+func NewI32ArrayContentWithType(data []byte, contentType string) I32ArrayContent {
+	content := WithContentType(NewI32ArrayContent(data), contentType)
+	if wrapped, ok := content.(I32ArrayContent); ok {
+		return wrapped
+	}
+	return NewI32ArrayContent(data)
 }
 
 // --- Coercion Helpers ---
@@ -293,7 +448,7 @@ func ToUTF8Content(c Content) (StringContent, error) {
 	if !utf8.Valid(data) {
 		return nil, fmt.Errorf("content is not valid UTF-8")
 	}
-	return NewStringContent(string(data)), nil
+	return NewStringContentWithType(string(data), ContentTypeOf(c)), nil
 }
 
 func ToBMPContent(c Content) (BMPContent, error) {
@@ -306,7 +461,7 @@ func ToBMPContent(c Content) (BMPContent, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid BMP data: %w", err)
 		}
-		return NewBMPContent(data, width, height), nil
+		return NewBMPContentWithType(data, width, height, ContentTypeOf(c)), nil
 	}
 	// If it's RGBAF32, we need to encode it
 	if rgba, ok := c.(RGBAF32Content); ok {
@@ -315,7 +470,7 @@ func ToBMPContent(c Content) (BMPContent, error) {
 		if err != nil {
 			return nil, err
 		}
-		return NewBMPContent(data, rgba.Width(), rgba.Height()), nil
+		return NewBMPContentWithType(data, rgba.Width(), rgba.Height(), ContentTypeOf(c)), nil
 	}
 	return nil, fmt.Errorf("cannot convert %s to BMP", c.Encoding())
 }
@@ -588,7 +743,7 @@ func (s *TileGroupStage) Process(ctx context.Context, input Content, requestID u
 		copy(pixels, outputPixels)
 	}
 
-	return NewRGBAF32Content(outputPixels, width, height), nil
+	return NewRGBAF32ContentWithType(outputPixels, width, height, ContentTypeOf(input)), nil
 }
 
 func (s *TileGroupStage) Close(ctx context.Context) error {

@@ -4,6 +4,8 @@ const INPUT_CAP: usize = 16 * 1024 * 1024;
 const OUTPUT_CAP: usize = 24 * 1024 * 1024;
 const ICON_FILE_HEADER_SIZE: u32 = 22; // ICONDIR (6) + one ICONDIRENTRY (16)
 const BMP_INFO_HEADER_SIZE: u32 = 40;
+const INPUT_CONTENT_TYPE = "image/bmp";
+const OUTPUT_CONTENT_TYPE = "image/x-icon";
 
 var input_buf: [INPUT_CAP]u8 = undefined;
 var output_buf: [OUTPUT_CAP]u8 = undefined;
@@ -22,6 +24,22 @@ export fn output_ptr() u32 {
 
 export fn output_bytes_cap() u32 {
     return @as(u32, @intCast(OUTPUT_CAP));
+}
+
+export fn input_content_type_ptr() u32 {
+    return @as(u32, @intCast(@intFromPtr(INPUT_CONTENT_TYPE.ptr)));
+}
+
+export fn input_content_type_size() u32 {
+    return @as(u32, @intCast(INPUT_CONTENT_TYPE.len));
+}
+
+export fn output_content_type_ptr() u32 {
+    return @as(u32, @intCast(@intFromPtr(OUTPUT_CONTENT_TYPE.ptr)));
+}
+
+export fn output_content_type_size() u32 {
+    return @as(u32, @intCast(OUTPUT_CONTENT_TYPE.len));
 }
 
 fn readU16LE(off: u32) u16 {

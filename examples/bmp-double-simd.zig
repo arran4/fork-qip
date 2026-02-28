@@ -3,6 +3,8 @@
 const builtin = @import("builtin");
 const INPUT_CAP: usize = 8 * 1024 * 1024;
 const OUTPUT_CAP: usize = 32 * 1024 * 1024;
+const INPUT_CONTENT_TYPE = "image/bmp";
+const OUTPUT_CONTENT_TYPE = "image/bmp";
 
 const Vec8 = @Vector(8, u8);
 const Vec16 = @Vector(16, u8);
@@ -25,6 +27,22 @@ export fn output_ptr() u32 {
 
 export fn output_bytes_cap() u32 {
     return @as(u32, @intCast(OUTPUT_CAP));
+}
+
+export fn input_content_type_ptr() u32 {
+    return @as(u32, @intCast(@intFromPtr(INPUT_CONTENT_TYPE.ptr)));
+}
+
+export fn input_content_type_size() u32 {
+    return @as(u32, @intCast(INPUT_CONTENT_TYPE.len));
+}
+
+export fn output_content_type_ptr() u32 {
+    return @as(u32, @intCast(@intFromPtr(OUTPUT_CONTENT_TYPE.ptr)));
+}
+
+export fn output_content_type_size() u32 {
+    return @as(u32, @intCast(OUTPUT_CONTENT_TYPE.len));
 }
 
 fn readU16LE(off: u32) u16 {

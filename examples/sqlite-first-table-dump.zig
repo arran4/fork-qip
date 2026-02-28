@@ -6,6 +6,7 @@ const MAX_COLUMNS: usize = 256;
 const MAX_TABLE_NAME: usize = 256;
 const MAX_SQL: usize = 64 * 1024;
 const MAX_PAYLOAD_COPY: usize = 1024 * 1024;
+const INPUT_CONTENT_TYPE = "application/vnd.sqlite3";
 
 var input_buf: [INPUT_CAP]u8 = undefined;
 var output_buf: [OUTPUT_CAP]u8 = undefined;
@@ -25,6 +26,14 @@ export fn output_ptr() u32 {
 
 export fn output_utf8_cap() u32 {
     return @as(u32, @intCast(OUTPUT_CAP));
+}
+
+export fn input_content_type_ptr() u32 {
+    return @as(u32, @intCast(@intFromPtr(INPUT_CONTENT_TYPE.ptr)));
+}
+
+export fn input_content_type_size() u32 {
+    return @as(u32, @intCast(INPUT_CONTENT_TYPE.len));
 }
 
 const SerialHeader = struct {

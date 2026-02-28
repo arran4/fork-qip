@@ -3,6 +3,8 @@ const std = @import("std");
 const INPUT_CAP: u32 = 0x40000;
 const OUTPUT_CAP: u32 = 0x80000;
 const TITLE_CAP: usize = 1024;
+const INPUT_CONTENT_TYPE = "text/html";
+const OUTPUT_CONTENT_TYPE = "text/html";
 const EMBEDDED_STYLES = std.mem.trimRight(u8, @embedFile("styles.css"), "\r\n");
 const EMBEDDED_HEADER = std.mem.trimRight(u8, @embedFile("header.html"), "\r\n");
 const EMBEDDED_FOOTER = std.mem.trimRight(u8, @embedFile("footer.html"), "\r\n");
@@ -30,6 +32,22 @@ export fn output_ptr() u32 {
 
 export fn output_utf8_cap() u32 {
     return OUTPUT_CAP;
+}
+
+export fn input_content_type_ptr() u32 {
+    return @as(u32, @intCast(@intFromPtr(INPUT_CONTENT_TYPE.ptr)));
+}
+
+export fn input_content_type_size() u32 {
+    return @as(u32, @intCast(INPUT_CONTENT_TYPE.len));
+}
+
+export fn output_content_type_ptr() u32 {
+    return @as(u32, @intCast(@intFromPtr(OUTPUT_CONTENT_TYPE.ptr)));
+}
+
+export fn output_content_type_size() u32 {
+    return @as(u32, @intCast(OUTPUT_CONTENT_TYPE.len));
 }
 
 const Writer = struct {
@@ -159,14 +177,14 @@ export fn run(input_size: u32) u32 {
 }
 
 test "wraps with title from h1" {
-    var out: [2048]u8 = undefined;
-    var title_buf: [TITLE_CAP]u8 = undefined;
     const input = "<h1>Hello <em>World</em></h1><p>Hi</p>";
-    const written = wrapHtml(input, out[0..], title_buf[0..]);
     const expected = std.fmt.comptimePrint(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Hello World</title><style>{s}</style></head><body><main><h1>Hello <em>World</em></h1><p>Hi</p></main></body></html>\n",
-        .{EMBEDDED_STYLES},
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Hello World</title><style>{s}</style>{s}<main><h1>Hello <em>World</em></h1><p>Hi</p></main>{s}\n",
+        .{ EMBEDDED_STYLES, EMBEDDED_HEADER, EMBEDDED_FOOTER },
     );
+    var out: [expected.len]u8 = undefined;
+    var title_buf: [TITLE_CAP]u8 = undefined;
+    const written = wrapHtml(input, out[0..], title_buf[0..]);
     try std.testing.expectEqualStrings(
         expected,
         out[0..written],
@@ -174,14 +192,14 @@ test "wraps with title from h1" {
 }
 
 test "defaults title when no h1" {
-    var out: [1024]u8 = undefined;
-    var title_buf: [TITLE_CAP]u8 = undefined;
     const input = "<p>No heading</p>";
-    const written = wrapHtml(input, out[0..], title_buf[0..]);
     const expected = std.fmt.comptimePrint(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Document</title><style>{s}</style></head><body><main><p>No heading</p></main></body></html>\n",
-        .{EMBEDDED_STYLES},
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Document</title><style>{s}</style>{s}<main><p>No heading</p></main>{s}\n",
+        .{ EMBEDDED_STYLES, EMBEDDED_HEADER, EMBEDDED_FOOTER },
     );
+    var out: [expected.len]u8 = undefined;
+    var title_buf: [TITLE_CAP]u8 = undefined;
+    const written = wrapHtml(input, out[0..], title_buf[0..]);
     try std.testing.expectEqualStrings(
         expected,
         out[0..written],

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	qinternal "github.com/royalicing/qip/internal"
+	"github.com/royalicing/qip/internal/wasmruntime"
+	"github.com/tetratelabs/wazero"
 )
 
 func TestParseRecipeFilename(t *testing.T) {
@@ -377,6 +379,91 @@ func TestRunAppliesColsUniform(t *testing.T) {
 	}
 	if withUniformH < baseH {
 		t.Fatalf("height unexpectedly decreased: base=%d uniform=%d", baseH, withUniformH)
+	}
+}
+
+func compileWasmModuleForTest(t *testing.T, ctx context.Context, runtime wazero.Runtime, path string) wazero.CompiledModule {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read module %s: %v", path, err)
+	}
+	compiled, err := runtime.CompileModule(ctx, body)
+	if err != nil {
+		t.Fatalf("compile module %s: %v", path, err)
+	}
+	return compiled
+}
+
+func TestContentTypeCheckingModesForRunModule(t *testing.T) {
+	ctx := context.Background()
+	runtime := wasmruntime.New(ctx)
+	defer runtime.Close(ctx)
+
+	compiled := compileWasmModuleForTest(t, ctx, runtime, "examples/html-aria-extractor.wasm")
+	defer compiled.Close(ctx)
+
+	input := []byte(`<a href="/x">X</a>`)
+	moduleName := "test-html-aria"
+
+	_, err := executeModuleWithInput(
+		ctx,
+		runtime,
+		compiled,
+		input,
+		options{contentTypeChecking: ContentTypeCheckingStrong},
+		moduleName,
+		nil,
+		"text/plain",
+		false,
+	)
+	if err == nil {
+		t.Fatal("expected strong content type mismatch error")
+	}
+	if !strings.Contains(err.Error(), "content type check failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = executeModuleWithInput(
+		ctx,
+		runtime,
+		compiled,
+		input,
+		options{contentTypeChecking: ContentTypeCheckingNone},
+		moduleName,
+		nil,
+		"text/plain",
+		false,
+	)
+	if err != nil {
+		t.Fatalf("none mode should skip content type mismatch: %v", err)
+	}
+}
+
+func TestTrustFirstStageContentTypePropagation(t *testing.T) {
+	ctx := context.Background()
+	runtime := wasmruntime.New(ctx)
+	defer runtime.Close(ctx)
+
+	compiled := compileWasmModuleForTest(t, ctx, runtime, "examples/html-link-extractor.wasm")
+	defer compiled.Close(ctx)
+
+	exec, err := executeModuleWithInput(
+		ctx,
+		runtime,
+		compiled,
+		[]byte(`<a href="/x">X</a>`),
+		options{contentTypeChecking: ContentTypeCheckingStrong},
+		"test-html-link",
+		nil,
+		"",
+		true,
+	)
+	if err != nil {
+		t.Fatalf("expected trusted first-stage input to pass: %v", err)
+	}
+	if exec.outputContentType != "text/html" {
+		t.Fatalf("outputContentType=%q, want %q", exec.outputContentType, "text/html")
 	}
 }
 

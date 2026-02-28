@@ -166,5 +166,8 @@ test-go:
 site/favicon.ico: qip-logo.svg
 	./qip run -i qip-logo.svg -- examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > $@
 
+site-static:
+	qip route warc ./site --recipes recipes --forms examples | qip run examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
+
 defluff:
 	find . -name '.DS_Store' -type f -delete

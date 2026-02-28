@@ -1,5 +1,7 @@
 # AGENTS Notes (Codex Sessions)
 
+The project uses a `Makefile` for common tasks. Use that and remember to pass `-j` to run in parallel.
+
 ## Project Context
 
 - `qip` has two distinct execution paths:
@@ -50,7 +52,7 @@
 
 ## Tests
 
-We have snapshots in `test/latest.txt` that are matched against `test/expected.txt`. When updating the tests within `Makefile` please run `make test` and verify all the tests pass.
+We have snapshots in `test/latest.txt` that are matched against `test/expected.txt`. When updating the tests within `Makefile` please run `make -j test` and verify all the tests pass.
 
 ## Optimization
 

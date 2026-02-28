@@ -6,6 +6,8 @@
 
 static unsigned char input_buffer[INPUT_CAP];
 static unsigned char output_buffer[OUTPUT_CAP];
+static const char input_content_type[] = "image/bmp";
+static const char output_content_type[] = "image/bmp";
 
 __attribute__((export_name("input_ptr")))
 uint32_t input_ptr() {
@@ -25,6 +27,26 @@ uint32_t output_ptr() {
 __attribute__((export_name("output_bytes_cap")))
 uint32_t output_bytes_cap() {
     return OUTPUT_CAP;
+}
+
+__attribute__((export_name("input_content_type_ptr")))
+uint32_t input_content_type_ptr() {
+    return (uint32_t)(uintptr_t)input_content_type;
+}
+
+__attribute__((export_name("input_content_type_size")))
+uint32_t input_content_type_size() {
+    return (uint32_t)(sizeof(input_content_type) - 1);
+}
+
+__attribute__((export_name("output_content_type_ptr")))
+uint32_t output_content_type_ptr() {
+    return (uint32_t)(uintptr_t)output_content_type;
+}
+
+__attribute__((export_name("output_content_type_size")))
+uint32_t output_content_type_size() {
+    return (uint32_t)(sizeof(output_content_type) - 1);
 }
 
 static uint16_t read_u16_le(uint32_t off) {

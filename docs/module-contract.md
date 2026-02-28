@@ -62,8 +62,27 @@ Rules:
 - Do not use comma-separated MIME lists.
 - Omit input content type for modules that accept any UTF-8 text regardless of media type (for example: plain text, HTML, XML).
 - Omit output content type for generic raw bytes and `i32[]` outputs unless the module guarantees a specific media type.
+- Do not export `text/plain` for generic UTF-8 modules; `input_utf8_cap` / `output_utf8_cap` already imply plain UTF-8 text.
 - Export content type when the module knows it exactly (for example: `text/javascript`, `text/html`, `image/bmp`).
 - Export only the media type value. Do not append `charset=utf-8`; UTF-8 is already implied by `input_utf8_cap` / `output_utf8_cap`.
+- If the host/caller provides an initial content type, treat it as authoritative for composition.
+- For direct user ingress in `qip run` (stdin or `-i` file bytes), there is currently no separate content-type channel; trust user intent for the first stage.
+
+### Content Type Composition Semantics
+
+These are the composition rules for run-module pipelines:
+
+- The pipeline starts with an optional initial content type from the caller/host context.
+- For direct user ingress in `qip run`, when initial content type is absent, the first module is allowed by user intent (stdin/`-i` is trusted as the expected type).
+- If a module exports `input_content_type_ptr`/`input_content_type_size`, the incoming content type must exactly match that MIME type.
+- If a module does not export input content type and uses `input_utf8_cap`, it is treated as a generic UTF-8 transform and may compose with any UTF-8 pipeline input.
+- If a module does not export input content type and uses `input_bytes_cap`, it is treated as a generic bytes transform and may compose with any bytes pipeline input.
+- If a module exports `output_content_type_ptr`/`output_content_type_size`, that MIME type becomes the pipeline content type for downstream stages.
+- If a module does not export output content type and uses `output_utf8_cap`, the existing pipeline content type is preserved.
+- If a module does not export output content type and uses `output_bytes_cap`, the existing pipeline content type is preserved.
+- Generic UTF-8 utility modules (for example, uppercase/trim/rewrite helpers) should usually omit content type metadata so they can run on any UTF-8 text while preserving upstream content type.
+- Generic bytes utility modules (for example, `base64-encode.wasm` style byte transforms) should usually omit content type metadata so they can run on any bytes while preserving upstream content type.
+- Example: `curl ... | qip run examples/html-link-extractor.wasm` composes by trusting user-provided stdin for the first stage (`text/html` expected by the module).
 
 ## Input/Output Semantics
 

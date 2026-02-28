@@ -6,6 +6,7 @@
 
 static unsigned char input_buffer[INPUT_CAP];
 static unsigned char output_buffer[OUTPUT_CAP];
+static const char input_content_type[] = "application/vnd.sqlite3";
 static uint32_t output_len;
 static int output_overflow;
 static uint32_t page_size;
@@ -29,6 +30,16 @@ uint32_t output_ptr() {
 __attribute__((export_name("output_utf8_cap")))
 uint32_t output_utf8_cap() {
     return OUTPUT_CAP;
+}
+
+__attribute__((export_name("input_content_type_ptr")))
+uint32_t input_content_type_ptr() {
+    return (uint32_t)(uintptr_t)input_content_type;
+}
+
+__attribute__((export_name("input_content_type_size")))
+uint32_t input_content_type_size() {
+    return (uint32_t)(sizeof(input_content_type) - 1);
 }
 
 static uint16_t read_u16_be(uint32_t off, uint32_t size, int *ok) {

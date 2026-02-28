@@ -4,9 +4,15 @@
   (global $input_bytes_cap (export "input_bytes_cap") i32 (i32.const 0x10000))
   (global $output_ptr (export "output_ptr") i32 (i32.const 0x20000))
   (global $output_utf8_cap (export "output_utf8_cap") i32 (i32.const 0x10000))
+  (global $input_content_type_ptr (export "input_content_type_ptr") i32 (i32.const 0x1800))
+  (global $input_content_type_size (export "input_content_type_size") i32 (i32.const 16))
+  (global $output_content_type_ptr (export "output_content_type_ptr") i32 (i32.const 0x1820))
+  (global $output_content_type_size (export "output_content_type_size") i32 (i32.const 15))
 
   ;; Base64 encoding table
   (data (i32.const 0x1000) "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+  (data (i32.const 0x1800) "application/wasm")
+  (data (i32.const 0x1820) "text/javascript")
 
   ;; Get base64 character for 6-bit value
   (func $base64_char (param $value i32) (result i32)
