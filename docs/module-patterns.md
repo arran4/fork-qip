@@ -4,19 +4,50 @@ This is a practical cookbook for writing `qip` modules.
 
 It also includes the error semantics for deciding whether to return a value, return empty output, or trap.
 Default recommendation: trap on invalid input or overflow for transformation modules.
+For validator-style modules that should compose in pipelines, prefer assertion pass-through: return input unchanged on success, trap on failure.
 
 ## Choose A Pattern
 
 Use this quick mapping:
 
-- Validate and emit only pass/fail: scalar `run` result, no output buffer exports.
+- Validate and keep data flowing (preferred): assertion pass-through (`run` validates, returns input unchanged, traps on failure).
+- Validate and emit only pass/fail (terminal): scalar `run` result, no output buffer exports.
 - Normalize text: UTF-8 input/output buffers.
 - Transform binary: bytes input/output buffers.
 - Emit numeric rows: `output_i32_cap`.
 - Preferred: hard reject invalid input/overflow with trap.
 - Optional: soft reject invalid input by returning `0` output length (or a sentinel scalar value) when empty output is explicitly meaningful.
 
-## Pattern 1: Scalar Validator (No Output Buffer)
+## Pattern 1: Assertion Pass-through Validator (Preferred)
+
+Use when you want to assert invariants in a chain without changing payload bytes.
+
+Exports:
+
+- `input_ptr`
+- `input_utf8_cap` or `input_bytes_cap`
+- `output_ptr`
+- matching output cap (`output_utf8_cap` for UTF-8, `output_bytes_cap` for bytes)
+- `run(input_size) -> output_size`
+
+Semantics:
+
+- On success, return input unchanged and set `output_size == input_size`.
+- On validation failure, trap.
+- Prefer `output_ptr == input_ptr` if no rewrite is needed.
+
+Host behavior:
+
+- Downstream modules receive the original data when validation passes.
+- Pipeline aborts on trap when validation fails.
+
+Good for:
+
+- broken-link checks over WARC/HTML
+- schema/assertion checks that must preserve input for later stages
+- safety gates before expensive transforms
+
+## Pattern 2: Scalar Validator (No Output Buffer)
 
 Use when you only need a status code.
 
@@ -37,7 +68,7 @@ Good for:
 
 - checks like "valid/invalid", "count", "score", "bitmask".
 
-## Pattern 2: Normalizer (UTF-8 -> UTF-8)
+## Pattern 3: Normalizer (UTF-8 -> UTF-8)
 
 Use when you rewrite text and return text.
 
@@ -61,7 +92,7 @@ Good for:
 - trimming
 - case conversion
 
-## Pattern 3: Binary Transformer (Bytes -> Bytes)
+## Pattern 4: Binary Transformer (Bytes -> Bytes)
 
 Use for non-text payloads.
 
@@ -73,14 +104,14 @@ Exports:
 - `output_bytes_cap`
 - `run(input_size) -> output_size`
 
-Host behavior matches Pattern 2, but no UTF-8 assumptions.
+Host behavior matches Pattern 3, but no UTF-8 assumptions.
 
 Good for:
 
 - image/container transforms
 - compression/decompression steps
 
-## Pattern 4: Numeric Stream (`i32` rows)
+## Pattern 5: Numeric Stream (`i32` rows)
 
 Use when you want hex lines from 32-bit values.
 
@@ -183,6 +214,7 @@ Prefer trap when:
 - partial output would be misleading
 - preserving source data is more important than availability
 - output would otherwise be silently truncated
+- validator modules are intended to compose with downstream stages (use assertion pass-through)
 
 Prefer soft failure when:
 
@@ -196,4 +228,5 @@ Prefer soft failure when:
 - Keep pointer/cap units consistent (bytes vs `i32` items).
 - Validate input length and trap on overflow.
 - Ensure `run` return value unit matches exported output cap type.
+- For validator modules in chains, default to assertion pass-through (`output_ptr == input_ptr`, return unchanged size, trap on failure).
 - Add tests for malformed input and oversized input.

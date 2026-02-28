@@ -1,14 +1,12 @@
 const std = @import("std");
 
 const INPUT_CAP: usize = 32 * 1024 * 1024;
-const OUTPUT_CAP: usize = 8 * 1024 * 1024;
 const INPUT_CONTENT_TYPE = "application/warc";
-const OUTPUT_CONTENT_TYPE = "text/plain";
+const OUTPUT_CONTENT_TYPE = "application/warc";
 
 const PATH_TABLE_CAP: usize = 65536;
 
 var input_buf: [INPUT_CAP]u8 = undefined;
-var output_buf: [OUTPUT_CAP]u8 = undefined;
 
 const PathEntry = struct {
     used: bool = false,
@@ -27,11 +25,12 @@ export fn input_bytes_cap() u32 {
 }
 
 export fn output_ptr() u32 {
-    return @as(u32, @intCast(@intFromPtr(&output_buf)));
+    // Pass-through: successful validation returns the original input bytes.
+    return @as(u32, @intCast(@intFromPtr(&input_buf)));
 }
 
-export fn output_utf8_cap() u32 {
-    return @as(u32, @intCast(OUTPUT_CAP));
+export fn output_bytes_cap() u32 {
+    return @as(u32, @intCast(INPUT_CAP));
 }
 
 export fn input_content_type_ptr() u32 {
@@ -67,45 +66,6 @@ const ResolveResult = union(enum) {
     ignore,
     invalid,
     ok: []const u8,
-};
-
-const Output = struct {
-    index: usize = 0,
-    overflow: bool = false,
-
-    fn remaining(self: *const Output) usize {
-        return output_buf.len - self.index;
-    }
-
-    fn writeByte(self: *Output, b: u8) void {
-        if (self.overflow) return;
-        if (self.remaining() < 1) {
-            self.overflow = true;
-            return;
-        }
-        output_buf[self.index] = b;
-        self.index += 1;
-    }
-
-    fn writeSlice(self: *Output, s: []const u8) void {
-        if (self.overflow or s.len == 0) return;
-        if (self.remaining() < s.len) {
-            self.overflow = true;
-            return;
-        }
-        @memcpy(output_buf[self.index .. self.index + s.len], s);
-        self.index += s.len;
-    }
-
-    fn writeUnsigned(self: *Output, value: usize) void {
-        if (self.overflow) return;
-        var buf: [32]u8 = undefined;
-        const rendered = std.fmt.bufPrint(buf[0..], "{d}", .{value}) catch {
-            self.overflow = true;
-            return;
-        };
-        self.writeSlice(rendered);
-    }
 };
 
 fn asciiLower(c: u8) u8 {
@@ -531,47 +491,28 @@ fn indexOfCloseTagIgnoreCase(body: []const u8, start: usize, tag_name: []const u
     return null;
 }
 
-fn writeBroken(out: *Output, source: []const u8, href: []const u8, target: []const u8, reason: []const u8) void {
-    out.writeSlice("BROKEN source=");
-    out.writeSlice(source);
-    out.writeSlice(" href=");
-    out.writeSlice(href);
-    out.writeSlice(" target=");
-    if (target.len == 0) {
-        out.writeSlice("-");
-    } else {
-        out.writeSlice(target);
-    }
-    out.writeSlice(" reason=");
-    out.writeSlice(reason);
-    out.writeByte('\n');
-}
-
-fn checkLink(out: *Output, source_path: []const u8, href: []const u8, internal_host: []const u8, join_buf: []u8, canonical_buf: []u8, checked_links: *usize, broken_links: *usize) void {
+fn checkLink(source_path: []const u8, href: []const u8, internal_host: []const u8, join_buf: []u8, canonical_buf: []u8, checked_links: *usize, broken_links: *usize) void {
     const resolved = resolveInternalLinkPath(source_path, href, internal_host, join_buf, canonical_buf);
     switch (resolved) {
         .ignore => return,
         .invalid => {
             checked_links.* += 1;
             broken_links.* += 1;
-            writeBroken(out, source_path, href, "", "invalid-link");
         },
         .ok => |target| {
             checked_links.* += 1;
             const status = pathTableLookup(target) orelse {
                 broken_links.* += 1;
-                writeBroken(out, source_path, href, target, "missing-route");
                 return;
             };
             if (status >= 400) {
                 broken_links.* += 1;
-                writeBroken(out, source_path, href, target, "non-success-status");
             }
         },
     }
 }
 
-fn processSrcSet(out: *Output, source_path: []const u8, value: []const u8, internal_host: []const u8, join_buf: []u8, canonical_buf: []u8, checked_links: *usize, broken_links: *usize) void {
+fn processSrcSet(source_path: []const u8, value: []const u8, internal_host: []const u8, join_buf: []u8, canonical_buf: []u8, checked_links: *usize, broken_links: *usize) void {
     var i: usize = 0;
     while (i < value.len) {
         while (i < value.len and (isSpace(value[i]) or value[i] == ',')) : (i += 1) {}
@@ -589,44 +530,44 @@ fn processSrcSet(out: *Output, source_path: []const u8, value: []const u8, inter
             }
         }
         const url = item_raw[0..url_end];
-        checkLink(out, source_path, url, internal_host, join_buf, canonical_buf, checked_links, broken_links);
+        checkLink(source_path, url, internal_host, join_buf, canonical_buf, checked_links, broken_links);
     }
 }
 
-fn processTagLinkAttr(out: *Output, tag: []const u8, attr: []const u8, value: []const u8, source_path: []const u8, internal_host: []const u8, join_buf: []u8, canonical_buf: []u8, checked_links: *usize, broken_links: *usize) void {
+fn processTagLinkAttr(tag: []const u8, attr: []const u8, value: []const u8, source_path: []const u8, internal_host: []const u8, join_buf: []u8, canonical_buf: []u8, checked_links: *usize, broken_links: *usize) void {
     if (value.len == 0) return;
     if (eqlIgnoreCase(attr, "href")) {
         if (eqlIgnoreCase(tag, "a") or eqlIgnoreCase(tag, "area") or eqlIgnoreCase(tag, "link")) {
-            checkLink(out, source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
+            checkLink(source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
         }
         return;
     }
     if (eqlIgnoreCase(attr, "src")) {
         if (eqlIgnoreCase(tag, "img") or eqlIgnoreCase(tag, "script") or eqlIgnoreCase(tag, "iframe") or eqlIgnoreCase(tag, "source") or eqlIgnoreCase(tag, "audio") or eqlIgnoreCase(tag, "video") or eqlIgnoreCase(tag, "track") or eqlIgnoreCase(tag, "embed")) {
-            checkLink(out, source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
+            checkLink(source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
         }
         return;
     }
     if (eqlIgnoreCase(attr, "action")) {
         if (eqlIgnoreCase(tag, "form")) {
-            checkLink(out, source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
+            checkLink(source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
         }
         return;
     }
     if (eqlIgnoreCase(attr, "data")) {
         if (eqlIgnoreCase(tag, "object")) {
-            checkLink(out, source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
+            checkLink(source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
         }
         return;
     }
     if (eqlIgnoreCase(attr, "srcset")) {
         if (eqlIgnoreCase(tag, "img") or eqlIgnoreCase(tag, "source")) {
-            processSrcSet(out, source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
+            processSrcSet(source_path, value, internal_host, join_buf, canonical_buf, checked_links, broken_links);
         }
     }
 }
 
-fn parseHTMLLinks(out: *Output, source_path: []const u8, html: []const u8, internal_host: []const u8, checked_links: *usize, broken_links: *usize) void {
+fn parseHTMLLinks(source_path: []const u8, html: []const u8, internal_host: []const u8, checked_links: *usize, broken_links: *usize) void {
     var join_buf: [4096]u8 = undefined;
     var canonical_buf: [4096]u8 = undefined;
 
@@ -707,7 +648,7 @@ fn parseHTMLLinks(out: *Output, source_path: []const u8, html: []const u8, inter
                 }
             }
 
-            processTagLinkAttr(out, tag, attr, value, source_path, internal_host, join_buf[0..], canonical_buf[0..], checked_links, broken_links);
+            processTagLinkAttr(tag, attr, value, source_path, internal_host, join_buf[0..], canonical_buf[0..], checked_links, broken_links);
         }
 
         i = j;
@@ -725,11 +666,13 @@ fn parseHTMLLinks(out: *Output, source_path: []const u8, html: []const u8, inter
     }
 }
 
-export fn run(input_size_u32: u32) u32 {
-    const input_size: usize = @intCast(input_size_u32);
-    if (input_size > INPUT_CAP) @trap();
+const ValidationSummary = struct {
+    checked_links: usize,
+    broken_links: usize,
+    page_count: usize,
+};
 
-    const input = input_buf[0..input_size];
+fn validateInternalLinks(input: []const u8) ValidationSummary {
     clearPathTable();
 
     var internal_host: []const u8 = "";
@@ -750,7 +693,6 @@ export fn run(input_size_u32: u32) u32 {
         }
     }
 
-    var out = Output{};
     var checked_links: usize = 0;
     var broken_links: usize = 0;
     var page_count: usize = 0;
@@ -770,28 +712,24 @@ export fn run(input_size_u32: u32) u32 {
         page_count += 1;
         var source_path_buf: [4096]u8 = undefined;
         const source_path = canonicalizePath(pathFromTargetURI(rec.target_uri), source_path_buf[0..]) orelse pathFromTargetURI(rec.target_uri);
-        parseHTMLLinks(&out, source_path, http.body, internal_host, &checked_links, &broken_links);
-        if (out.overflow) @trap();
+        parseHTMLLinks(source_path, http.body, internal_host, &checked_links, &broken_links);
     }
 
-    if (broken_links == 0) {
-        out.writeSlice("OK 0 broken internal links (checked ");
-        out.writeUnsigned(checked_links);
-        out.writeSlice(" links across ");
-        out.writeUnsigned(page_count);
-        out.writeSlice(" pages)\n");
-    } else {
-        out.writeSlice("FAIL ");
-        out.writeUnsigned(broken_links);
-        out.writeSlice(" broken internal links (checked ");
-        out.writeUnsigned(checked_links);
-        out.writeSlice(" links across ");
-        out.writeUnsigned(page_count);
-        out.writeSlice(" pages)\n");
-    }
+    return .{
+        .checked_links = checked_links,
+        .broken_links = broken_links,
+        .page_count = page_count,
+    };
+}
 
-    if (out.overflow) @trap();
-    return @as(u32, @intCast(out.index));
+export fn run(input_size_u32: u32) u32 {
+    const input_size: usize = @intCast(input_size_u32);
+    if (input_size > INPUT_CAP) @trap();
+
+    const input = input_buf[0..input_size];
+    const summary = validateInternalLinks(input);
+    if (summary.broken_links != 0) @trap();
+    return input_size_u32;
 }
 
 fn appendWARCRecord(
@@ -851,13 +789,11 @@ test "all internal links resolve" {
 
     @memcpy(input_buf[0..n], build_buf[0..n]);
     const out_len = run(@as(u32, @intCast(n)));
-    const got = output_buf[0..out_len];
-
-    const expected = "OK 0 broken internal links (checked 4 links across 3 pages)\n";
-    try std.testing.expectEqualStrings(expected, got);
+    try std.testing.expectEqual(@as(u32, @intCast(n)), out_len);
+    try std.testing.expectEqualSlices(u8, build_buf[0..n], input_buf[0..@as(usize, @intCast(out_len))]);
 }
 
-test "reports broken internal links" {
+test "detects broken internal links" {
     var build_buf: [8192]u8 = undefined;
     var n: usize = 0;
 
@@ -876,13 +812,8 @@ test "reports broken internal links" {
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<p>Docs</p>",
     );
 
-    @memcpy(input_buf[0..n], build_buf[0..n]);
-    const out_len = run(@as(u32, @intCast(n)));
-    const got = output_buf[0..out_len];
-
-    const expected =
-        "BROKEN source=/ href=/missing target=/missing reason=missing-route\n" ++
-        "BROKEN source=/ href=img/logo.png target=/img/logo.png reason=missing-route\n" ++
-        "FAIL 2 broken internal links (checked 4 links across 2 pages)\n";
-    try std.testing.expectEqualStrings(expected, got);
+    const summary = validateInternalLinks(build_buf[0..n]);
+    try std.testing.expectEqual(@as(usize, 4), summary.checked_links);
+    try std.testing.expectEqual(@as(usize, 2), summary.broken_links);
+    try std.testing.expectEqual(@as(usize, 2), summary.page_count);
 }
