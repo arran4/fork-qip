@@ -55,7 +55,7 @@ Memory is only copied between modules so within it can mutate memory as much as 
 
 ## Tech choices
 
-`qip` is built in Go using its venerable standard library for file system access, HTTP server, and common format decoding/encoding. The wazero library is used to run WebAssembly modules in a secure sandbox. WebAssembly modules can be authored in C, Zig, WAT, or any language that targets wasm32.
+`qip` is built in Go using its venerable standard library for file system access, HTTP server, and common format decoding/encoding. The [wazero](https://wazero.io) library is used to run WebAssembly modules in a secure sandbox. WebAssembly modules can be authored in C, Zig, WAT, or any language that targets wasm32.
 
 It specifically does not use WASI. This standard has ballooned in complexity and scope creep. To get stuff done and to support browsers we can use a much smaller contract between hosts and modules.
 
