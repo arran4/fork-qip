@@ -76,7 +76,7 @@ examples-zig-wasm: examples/html-page-wrap.wasm
 examples-zig-wasm: recipes/text/markdown/10-markdown-basic.wasm
 examples-zig-wasm: recipes/text/markdown/20-html-page-wrap.wasm
 
-recipes: recipes/text/markdown/10-markdown-basic.wasm recipes/text/markdown/20-html-page-wrap.wasm
+recipes: recipes/text/markdown/10-markdown-basic.wasm recipes/text/markdown/19-add-fathom-analytics-script.wasm recipes/text/markdown/20-html-page-wrap.wasm
 
 examples: examples-wat-wasm examples-c-wasm examples-zig-wasm
 
@@ -152,7 +152,7 @@ test-snapshot: qip examples
 	@printf "%s\n" "module: wasm-to-js.wasm" >> test/latest.txt
 	@cat examples/hello.wasm | ./qip run examples/wasm-to-js.wasm >> test/latest.txt
 
-ZIG_TEST_FILES := $(wildcard examples/*.zig) recipes/text/markdown/10-markdown-basic.zig recipes/text/markdown/20-html-page-wrap.zig
+ZIG_TEST_FILES := $(wildcard examples/*.zig) recipes/text/markdown/10-markdown-basic.zig recipes/text/markdown/19-add-fathom-analytics-script.zig recipes/text/markdown/20-html-page-wrap.zig
 
 test-zig: $(ZIG_TEST_FILES)
 	@for f in $^; do \
