@@ -1969,6 +1969,7 @@ type devRuntimeState struct {
 	contentRoutes map[string]qinternal.ContentRoute
 	routeOptions  qinternal.RouteOptions
 	recipeChains  map[string]*qinternal.Pipeline
+	recipeOutput  map[string]string
 	recipeDigests map[string][][32]byte
 	recipeStamps  map[string]moduleFileStamp
 	formModules   map[string][]byte
@@ -2391,8 +2392,13 @@ func buildRouteListEntries(state *devRuntimeState) []routeListEntry {
 	entries := make([]routeListEntry, 0, len(paths)*2)
 	for _, requestPath := range paths {
 		route := canonicalRoutes[requestPath]
-		_, hasRecipes := state.recipeChains[route.SourceMIME]
+		hasRecipes := shouldApplyRecipesForRequestPath(requestPath, route, state.recipeChains)
 		contentType := devResponseContentType(route.SourceMIME, hasRecipes, qinternal.NewRawBytesContent(nil), nil)
+		if hasRecipes {
+			if recipeType := state.recipeOutput[route.SourceMIME]; recipeType != "" {
+				contentType = recipeType
+			}
+		}
 		contentType = mediaTypeOnly(contentType)
 		entries = append(entries, routeListEntry{
 			Method:      http.MethodGet,
@@ -2597,7 +2603,7 @@ func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRu
 			sourceDigest := sha256.Sum256(inputBytes)
 
 			var result qinternal.Content = qinternal.NewRawBytesContentWithType(inputBytes, route.SourceMIME)
-			hasRecipes := current.recipeChains[route.SourceMIME] != nil
+			hasRecipes := shouldApplyRecipesForRequestPath(r.URL.Path, route, current.recipeChains)
 			if hasRecipes {
 				pipeline := current.recipeChains[route.SourceMIME]
 				ctx := context.Background()
@@ -2631,7 +2637,11 @@ func newDevRequestHandler(logPrefix string, stateMu *sync.RWMutex, state **devRu
 
 			headers := make(http.Header)
 			headers.Set("Content-Type", contentType)
-			etag := buildDevETag(sourceDigest, current.recipeDigests[route.SourceMIME], formDigests)
+			recipeDigests := [][32]byte(nil)
+			if hasRecipes {
+				recipeDigests = current.recipeDigests[route.SourceMIME]
+			}
+			etag := buildDevETag(sourceDigest, recipeDigests, formDigests)
 			if etag != "" {
 				headers.Set("ETag", etag)
 				if r.Header.Get("If-None-Match") == etag {
@@ -2666,6 +2676,7 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 	if err != nil {
 		return nil, err
 	}
+	recipeOutput := inferRecipeOutputContentTypes(ctx, recipeChains)
 	recipeStamps, err := scanRecipeModuleStamps(recipesRoot)
 	if err != nil {
 		closePipelines(ctx, recipeChains)
@@ -2680,6 +2691,7 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 		contentRoutes: contentRoutes,
 		routeOptions:  routeOptions,
 		recipeChains:  recipeChains,
+		recipeOutput:  recipeOutput,
 		recipeDigests: recipeDigests,
 		recipeStamps:  recipeStamps,
 		formModules:   formModules,
@@ -3386,6 +3398,116 @@ func devResponseContentType(sourceMIME string, recipesApplied bool, output qinte
 		return sourceMIME + "; charset=utf-8"
 	}
 	return sourceMIME
+}
+
+func shouldApplyRecipesForRequestPath(requestPath string, route qinternal.ContentRoute, recipeChains map[string]*qinternal.Pipeline) bool {
+	if recipeChains == nil || recipeChains[route.SourceMIME] == nil {
+		return false
+	}
+	if route.SourceMIME != "text/markdown" {
+		return true
+	}
+
+	switch strings.ToLower(path.Ext(requestPath)) {
+	case ".md", ".markdown":
+		return false
+	default:
+		return true
+	}
+}
+
+func inferRecipeOutputContentTypes(ctx context.Context, recipeChains map[string]*qinternal.Pipeline) map[string]string {
+	out := make(map[string]string, len(recipeChains))
+	for mimeType, pipeline := range recipeChains {
+		contentType, err := inferPipelineOutputContentType(ctx, pipeline, mimeType)
+		if err != nil || contentType == "" {
+			continue
+		}
+		out[mimeType] = contentType
+	}
+	return out
+}
+
+func inferPipelineOutputContentType(ctx context.Context, pipeline *qinternal.Pipeline, initialContentType string) (string, error) {
+	if pipeline == nil {
+		return "", nil
+	}
+	currentContentType := normalizeIncomingContentType(initialContentType)
+	for i, stage := range pipeline.Stages {
+		runStage, ok := stage.(*qinternal.RunStage)
+		if !ok {
+			// Only run stages can declare output_content_type_ptr.
+			currentContentType = ""
+			continue
+		}
+		driver, ok := runStage.Driver.(*wasmRunDriver)
+		if !ok {
+			currentContentType = ""
+			continue
+		}
+
+		outputType, hasOutputType, outputEncoding, hasOutputEncoding, err := inspectRunModuleOutputContract(
+			ctx,
+			driver.runtime,
+			driver.compiled,
+			fmt.Sprintf("inspect-output-%d", i),
+		)
+		if err != nil {
+			return "", err
+		}
+		if hasOutputType {
+			currentContentType = outputType
+			continue
+		}
+		if hasOutputEncoding && (outputEncoding == dataEncodingUTF8 || outputEncoding == dataEncodingRaw) {
+			continue
+		}
+		currentContentType = ""
+	}
+	return currentContentType, nil
+}
+
+func inspectRunModuleOutputContract(
+	ctx context.Context,
+	runtime wazero.Runtime,
+	compiled wazero.CompiledModule,
+	moduleName string,
+) (outputType string, hasOutputType bool, outputEncoding dataEncoding, hasOutputEncoding bool, err error) {
+	mod, err := runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(moduleName))
+	if err != nil {
+		return "", false, 0, false, errors.New("Wasm module could not be instantiated")
+	}
+	defer mod.Close(ctx)
+
+	outputType, hasOutputType, err = readOptionalModuleContentType(ctx, mod, "output")
+	if err != nil {
+		return "", false, 0, false, err
+	}
+
+	_, hasOutputPtr, err := getExportedValue(ctx, mod, "output_ptr")
+	if err != nil {
+		return "", false, 0, false, wasmruntime.HumanizeExecutionError(ctx, err)
+	}
+	if !hasOutputPtr {
+		return outputType, hasOutputType, 0, false, nil
+	}
+
+	if _, ok, err := getExportedValue(ctx, mod, "output_utf8_cap"); err != nil {
+		return "", false, 0, false, wasmruntime.HumanizeExecutionError(ctx, err)
+	} else if ok {
+		return outputType, hasOutputType, dataEncodingUTF8, true, nil
+	}
+	if _, ok, err := getExportedValue(ctx, mod, "output_bytes_cap"); err != nil {
+		return "", false, 0, false, wasmruntime.HumanizeExecutionError(ctx, err)
+	} else if ok {
+		return outputType, hasOutputType, dataEncodingRaw, true, nil
+	}
+	if _, ok, err := getExportedValue(ctx, mod, "output_i32_cap"); err != nil {
+		return "", false, 0, false, wasmruntime.HumanizeExecutionError(ctx, err)
+	} else if ok {
+		return outputType, hasOutputType, dataEncodingArrayI32, true, nil
+	}
+	return outputType, hasOutputType, 0, false, nil
 }
 
 type stageKind uint8

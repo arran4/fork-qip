@@ -248,7 +248,7 @@ func TestBuildRouteListEntries(t *testing.T) {
 		},
 		routeOptions: qinternal.DefaultRouteOptions(),
 		recipeChains: map[string]*qinternal.Pipeline{
-			"text/markdown": nil,
+			"text/markdown": &qinternal.Pipeline{},
 		},
 	}
 
@@ -258,6 +258,57 @@ func TestBuildRouteListEntries(t *testing.T) {
 		{Method: "HEAD", Path: "/about", ContentType: "text/html"},
 		{Method: "GET", Path: "/images/logo", ContentType: "image/png"},
 		{Method: "HEAD", Path: "/images/logo", ContentType: "image/png"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("entries=%v, want %v", got, want)
+	}
+}
+
+func TestBuildRouteListEntriesMarkdownExtensionServesRaw(t *testing.T) {
+	state := &devRuntimeState{
+		contentRoutes: map[string]qinternal.ContentRoute{
+			"/guide":    {FilePath: "docs/guide.md", SourceMIME: "text/markdown"},
+			"/guide.md": {FilePath: "docs/guide.md", SourceMIME: "text/markdown"},
+		},
+		routeOptions: qinternal.DefaultRouteOptions(),
+		recipeChains: map[string]*qinternal.Pipeline{
+			"text/markdown": &qinternal.Pipeline{},
+		},
+	}
+
+	got := buildRouteListEntries(state)
+	want := []routeListEntry{
+		{Method: "GET", Path: "/guide", ContentType: "text/html"},
+		{Method: "HEAD", Path: "/guide", ContentType: "text/html"},
+		{Method: "GET", Path: "/guide.md", ContentType: "text/markdown"},
+		{Method: "HEAD", Path: "/guide.md", ContentType: "text/markdown"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("entries=%v, want %v", got, want)
+	}
+}
+
+func TestBuildRouteListEntriesUsesRecipeOutputContentType(t *testing.T) {
+	state := &devRuntimeState{
+		contentRoutes: map[string]qinternal.ContentRoute{
+			"/guide":    {FilePath: "docs/guide.md", SourceMIME: "text/markdown"},
+			"/guide.md": {FilePath: "docs/guide.md", SourceMIME: "text/markdown"},
+		},
+		routeOptions: qinternal.DefaultRouteOptions(),
+		recipeChains: map[string]*qinternal.Pipeline{
+			"text/markdown": &qinternal.Pipeline{},
+		},
+		recipeOutput: map[string]string{
+			"text/markdown": "application/xhtml+xml",
+		},
+	}
+
+	got := buildRouteListEntries(state)
+	want := []routeListEntry{
+		{Method: "GET", Path: "/guide", ContentType: "application/xhtml+xml"},
+		{Method: "HEAD", Path: "/guide", ContentType: "application/xhtml+xml"},
+		{Method: "GET", Path: "/guide.md", ContentType: "text/markdown"},
+		{Method: "HEAD", Path: "/guide.md", ContentType: "text/markdown"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("entries=%v, want %v", got, want)
