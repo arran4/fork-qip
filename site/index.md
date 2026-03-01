@@ -16,6 +16,18 @@ Planned host integrations include Swift, React, and Elixir, pushing further towa
 go install github.com/royalicing/qip@latest
 ```
 
+## Text
+
+TODO: add Markdown example. Show using `qip comply` to validate against CommonMark.
+
+## Images
+
+TODO: add image processing pipeline.
+
+## Websites
+
+TODO: show how to combine all of this into a website.
+
 ## The problems with software today
 
 Software today is like Matryoshka dolls, frameworks that depend on libraries that depend on libraries that depend on OS libs and so on. This can be incredibly productive for building, but has lead to increasingly complex and bloated end-user apps.
@@ -41,6 +53,16 @@ Coding agents are now good enough that you can vibe C or Zig modules that run su
 Paradigms like functional or object-oriented or garbage collection become less relevant in this new world. These were patterns that allowed teams of humans to consistently make sense of the modular parts they wove into software. To a LLM, imperative is just as easy as any other paradigm to author. Static or bump allocation is no harder than `malloc`/`free`.
 
 Memory is only copied between modules so within it can mutate memory as much as it likes, which lets you (or your agent) find the most optimal algorithm. If we align code written to the underlying computing model of the von-Neumann-architecture we can get predictably faster performance. We get pockets of speed safely sewn together.
+
+## Content-first: formats & encodings at the center
+
+We believe in using the formats that have stood the test of time. Need a simple uncompressed image format? `image/bmp`. Need vector graphics? `image/svg+xml`. Need a snapshot of a directory of files? `application/x-tar`. Need a snapshot of a website? `application/warc`. Need a collection of structured data? `application/vnd.sqlite3`.
+
+The philosophy of qip is: prefer to add functionality via modules rather than building it into qip itself. This means the aim becomes for qip to produce a format that is easily consumable.
+
+For example, our static site builder produces a [WARC archive](<https://en.wikipedia.org/wiki/WARC_(file_format)>) — it’s up to you to decide how that would be turned into a collection of files. Perhaps you want trailing/ slashes/ in your URLs. Perhaps you don’t. Perhaps you want to add a Nginx config. Perhaps you want to upload the content straight to a S3 bucket with no intermediate files touching disk. This is left up to you. qip produces a simple archive of every page route, and then it’s up to you to determine how to use that.
+
+Another belief is qip is content-first, not file-first. Web pages are made of served content, and that content might be dynamic: there might not be a file representation backing what users see. This unlocks flexibility with the ability to pipeline any content together. Files need a name, permissions, a file system for it to live in. We just want the content inside.
 
 ## Benefits
 
