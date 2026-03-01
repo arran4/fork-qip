@@ -173,6 +173,7 @@ qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/col
 
 - [ ] Add digest pinning for remote modules (for example `https://...#sha256=<hex>`), and fail fast when fetched bytes do not match the pinned digest.
 - [ ] Update docs to encourage hard failure with traps instead of returning empty output which could lead to data loss.
+- [ ] Add symlink support for reading recipes. This means we can have a single implementation and then link it into the recipes directory.
 - [ ] Add `qip serve` command that runs the server in `prod` mode by default, and includes a module upload endpoint.
 - [ ] Add `random_ptr` and `random_size` to modules that the host can detect and fill in with random data. It can choose to seed with determinism or use a cryptographic source of randomness — it’s up to the host.
 - [ ] Add `--postcondition` or `--outmust` flag to `qip run` that verifies the final output conforms to a particular module e.g. `--postcondition valid-xml-1.0.wasm`.

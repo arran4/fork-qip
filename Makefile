@@ -10,8 +10,9 @@ ZIG_WASM_FLAGS := -target wasm32-freestanding -O ReleaseSmall -fno-entry -rdynam
 GO_FIX_PKGS := ./cmd/... ./internal/... ./tools/...
 GO_FMT_PKGS := . ./cmd/... ./internal/... ./tools/...
 GO_TEST_PKGS := . ./cmd/... ./internal/... ./tools/...
+QIP_GO_DEPS := main.go $(wildcard cmd/*.go) $(wildcard internal/*.go) $(wildcard internal/*/*.go)
 
-qip: main.go go.mod go.sum $(wildcard internal/*.go)
+qip: go.mod go.sum $(QIP_GO_DEPS)
 	go fix $(GO_FIX_PKGS)
 	go fmt $(GO_FMT_PKGS)
 	go build -ldflags="-s -w" -trimpath
@@ -167,7 +168,7 @@ site/favicon.ico: qip-logo.svg
 	./qip run -i qip-logo.svg -- examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > $@
 
 site-static:
-	qip route warc ./site --recipes recipes --forms examples | qip run examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
+	qip route warc ./site --recipes recipes --forms examples --include-source | qip run examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
 
 defluff:
 	find . -name '.DS_Store' -type f -delete

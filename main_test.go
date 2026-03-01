@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -312,6 +313,55 @@ func TestBuildRouteListEntriesUsesRecipeOutputContentType(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("entries=%v, want %v", got, want)
+	}
+}
+
+func TestResolveRecipeSourceResponse(t *testing.T) {
+	state := &devRuntimeState{
+		recipeSourceAssets: []qinternal.RecipeSourceAsset{
+			{
+				RequestPath: "/view-source/recipes/text/markdown/10-markdown-basic.zig",
+				Body:        []byte("const x = 1;"),
+				ContentType: "text/plain; charset=utf-8",
+			},
+		},
+		recipeSourceByPath: map[string]qinternal.RecipeSourceAsset{
+			"/view-source/recipes/text/markdown/10-markdown-basic.zig": {
+				RequestPath: "/view-source/recipes/text/markdown/10-markdown-basic.zig",
+				Body:        []byte("const x = 1;"),
+				ContentType: "text/plain; charset=utf-8",
+			},
+		},
+		recipeSourceIndex: []byte("<!doctype html><h1>/view-source</h1><h2>Recipes</h2><h2>Content</h2>"),
+	}
+
+	indexResp, ok := resolveRecipeSourceResponse("/view-source", state)
+	if !ok {
+		t.Fatal("expected index response")
+	}
+	if indexResp.StatusCode != http.StatusOK {
+		t.Fatalf("index status=%d, want %d", indexResp.StatusCode, http.StatusOK)
+	}
+	if got := indexResp.Header.Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("index content-type=%q, want %q", got, "text/html; charset=utf-8")
+	}
+	if _, ok := resolveRecipeSourceResponse("/view-source/recipes", state); ok {
+		t.Fatalf("did not expect /view-source/recipes to resolve as an index page")
+	}
+
+	assetResp, ok := resolveRecipeSourceResponse("/view-source/recipes/text/markdown/10-markdown-basic.zig", state)
+	if !ok {
+		t.Fatal("expected asset response")
+	}
+	if got := assetResp.Header.Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("asset content-type=%q, want %q", got, "text/plain; charset=utf-8")
+	}
+	if string(assetResp.Body) != "const x = 1;" {
+		t.Fatalf("asset body=%q", string(assetResp.Body))
+	}
+
+	if _, ok := resolveRecipeSourceResponse("/view-source/recipes/missing.zig", state); ok {
+		t.Fatal("expected missing asset to not resolve")
 	}
 }
 

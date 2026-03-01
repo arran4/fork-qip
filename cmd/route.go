@@ -20,14 +20,15 @@ import (
 )
 
 type RouteWARCRequest struct {
-	ContentRoot string
-	RequestPath string
-	RecipesRoot string
-	FormsRoot   string
-	ModeRaw     string
-	Host        string
-	Verbose     bool
-	OutputPath  string
+	ContentRoot   string
+	RequestPath   string
+	RecipesRoot   string
+	FormsRoot     string
+	ModeRaw       string
+	Host          string
+	Verbose       bool
+	OutputPath    string
+	IncludeSource bool
 }
 
 type RouteConfig struct {
@@ -75,6 +76,7 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	var modeRaw string
 	hostRaw := "qip.local"
 	outputPath := "-"
+	includeSource := false
 
 	fs := flag.NewFlagSet("route warc", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -87,6 +89,7 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	fs.StringVar(&hostRaw, "host", hostRaw, "WARC-Target-URI host")
 	fs.StringVar(&outputPath, "o", "-", "output WARC path ('-' for stdout)")
 	fs.StringVar(&outputPath, "output", "-", "output WARC path ('-' for stdout)")
+	fs.BoolVar(&includeSource, "include-source", false, "include /view-source plus recipe source files from --recipes")
 	if err := fs.Parse(normalizeRouteWarcArgs(args)); err != nil {
 		return fmt.Errorf("%s %w", config.UsageRouteWarc, err)
 	}
@@ -102,14 +105,18 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	}
 
 	contentRoot := rest[0]
+	if includeSource && strings.TrimSpace(recipesRoot) == "" {
+		return errors.New("--include-source requires --recipes <recipes_dir>")
+	}
 	baseRequest := RouteWARCRequest{
-		ContentRoot: contentRoot,
-		RecipesRoot: recipesRoot,
-		FormsRoot:   formsRoot,
-		ModeRaw:     modeRaw,
-		Host:        host,
-		Verbose:     verbose,
-		OutputPath:  outputPath,
+		ContentRoot:   contentRoot,
+		RecipesRoot:   recipesRoot,
+		FormsRoot:     formsRoot,
+		ModeRaw:       modeRaw,
+		Host:          host,
+		Verbose:       verbose,
+		OutputPath:    outputPath,
+		IncludeSource: includeSource,
 	}
 
 	paths, err := config.ListWARCPaths(context.Background(), baseRequest)
@@ -140,6 +147,17 @@ func runRouteWARC(args []string, config RouteConfig) error {
 			return fmt.Errorf("failed to build WARC record for %q: %w", requestPath, err)
 		}
 		warcBytes.Write(record)
+	}
+
+	if includeSource {
+		markdownPaths := qinternal.FilterMarkdownRequestPaths(paths)
+		sourceRecords, err := buildRecipeSourceWARCRecords(host, recipesRoot, markdownPaths)
+		if err != nil {
+			return err
+		}
+		for _, record := range sourceRecords {
+			warcBytes.Write(record)
+		}
 	}
 
 	if outputPath == "" || outputPath == "-" {
@@ -279,6 +297,38 @@ func buildHTTPResponsePayload(response qinternal.InProcessHTTPResponse) []byte {
 	payload.WriteString("\r\n")
 	payload.Write(response.Body)
 	return payload.Bytes()
+}
+
+func buildRecipeSourceWARCRecords(host string, recipesRoot string, markdownRequestPaths []string) ([][]byte, error) {
+	assets, err := qinternal.CollectRecipeSourceAssets(recipesRoot)
+	if err != nil {
+		return nil, err
+	}
+	indexBody := qinternal.BuildViewSourceIndexHTML(assets, markdownRequestPaths)
+	indexResponse := qinternal.InProcessHTTPResponse{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+		Body:       indexBody,
+	}
+	records := make([][]byte, 0, len(assets)+1)
+	indexRecord, err := buildMinimalWARCResponseRecord("http://"+host+"/view-source", indexResponse)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build WARC record for %q: %w", "/view-source", err)
+	}
+	records = append(records, indexRecord)
+	for _, asset := range assets {
+		response := qinternal.InProcessHTTPResponse{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{asset.ContentType}},
+			Body:       asset.Body,
+		}
+		record, err := buildMinimalWARCResponseRecord("http://"+host+asset.RequestPath, response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build WARC record for %q: %w", asset.RequestPath, err)
+		}
+		records = append(records, record)
+	}
+	return records, nil
 }
 
 func newWARCRecordID() (string, error) {

@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -154,6 +156,99 @@ func TestRunRouteWARCRejectsMethodFlags(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -method") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunRouteWARCIncludeSourceRequiresRecipes(t *testing.T) {
+	err := RunRoute([]string{"warc", "--include-source", "docs"}, RouteConfig{
+		UsageRoute:     "usage route",
+		UsageRouteWarc: "usage route warc",
+		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
+			return []string{"/a"}, nil
+		},
+		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			return qinternal.InProcessHTTPResponse{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "--include-source requires --recipes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunRouteWARCIncludeSourceAddsViewSourceRecords(t *testing.T) {
+	recipesRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(recipesRoot, "text", "markdown"), 0o755); err != nil {
+		t.Fatalf("mkdir recipes: %v", err)
+	}
+	markdownZig := filepath.Join(recipesRoot, "text", "markdown", "10-markdown-basic.zig")
+	markdownWasm := filepath.Join(recipesRoot, "text", "markdown", "10-markdown-basic.wasm")
+	if err := os.WriteFile(markdownZig, []byte("const std = @import(\"std\");"), 0o644); err != nil {
+		t.Fatalf("write zig: %v", err)
+	}
+	if err := os.WriteFile(markdownWasm, []byte{0x00, 0x61, 0x73, 0x6d}, 0o644); err != nil {
+		t.Fatalf("write wasm: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(recipesRoot, ".DS_Store"), []byte("noise"), 0o644); err != nil {
+		t.Fatalf("write hidden file: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := RunRoute([]string{"warc", "--include-source", "--recipes", recipesRoot, "docs"}, RouteConfig{
+		UsageRoute:     "usage route",
+		UsageRouteWarc: "usage route warc",
+		DefaultMode:    "dev",
+		Stdout:         &out,
+		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
+			if !request.IncludeSource {
+				t.Fatalf("expected IncludeSource to be true")
+			}
+			return []string{"/a", "/guide", "/guide.md"}, nil
+		},
+		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			return qinternal.InProcessHTTPResponse{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/plain"}},
+				Body:       []byte("ok"),
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunRoute: %v", err)
+	}
+
+	got := out.String()
+	if gotCount := strings.Count(got, "WARC/1.0\r\n"); gotCount != 6 {
+		t.Fatalf("record count=%d, want 6", gotCount)
+	}
+	if !strings.Contains(got, "WARC-Target-URI: http://qip.local/view-source\r\n") {
+		t.Fatalf("missing view-source index record")
+	}
+	if !strings.Contains(got, "WARC-Target-URI: http://qip.local/view-source/recipes/text/markdown/10-markdown-basic.zig\r\n") {
+		t.Fatalf("missing zig source record")
+	}
+	if !strings.Contains(got, "WARC-Target-URI: http://qip.local/view-source/recipes/text/markdown/10-markdown-basic.wasm\r\n") {
+		t.Fatalf("missing wasm source record")
+	}
+	if !strings.Contains(got, "<h1>/view-source</h1>") {
+		t.Fatalf("missing view-source index HTML content")
+	}
+	if !strings.Contains(got, "<h2>Recipes</h2>") {
+		t.Fatalf("missing recipes heading in view-source index")
+	}
+	if !strings.Contains(got, "<h2>Content</h2>") {
+		t.Fatalf("missing content heading in view-source index")
+	}
+	if !strings.Contains(got, "href=\"/view-source/recipes/text/markdown/10-markdown-basic.zig\"") {
+		t.Fatalf("missing zig link in view-source index")
+	}
+	if !strings.Contains(got, "href=\"/guide.md\"") {
+		t.Fatalf("missing markdown content link in view-source index")
+	}
+	if !strings.Contains(got, "Content-Type: application/wasm\r\n") {
+		t.Fatalf("missing wasm content-type in archived response payload")
+	}
+	if strings.Contains(got, "/view-source/recipes/.DS_Store") {
+		t.Fatalf("hidden files should not be included in view-source output")
 	}
 }
 
