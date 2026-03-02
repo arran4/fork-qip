@@ -147,6 +147,8 @@ test-snapshot: qip examples
 	@printf %s " rgb( 101, 79, 240 ) " | $(QIP_BIN) run examples/rgb-to-hex.wasm >> test/latest.txt
 	@printf "%s\n" "module: tld-validator.wasm" >> test/latest.txt
 	@printf %s "com" | $(QIP_BIN) run examples/tld-validator.wasm >> test/latest.txt
+	@printf "%s\n" "module: youtube-id-extractor.wasm" >> test/latest.txt
+	@printf %s "https://youtu.be/dQw4w9WgXcQ https://www.youtube.com/embed/9bZkp7q19f0 https://www.youtube.com/watch?v=3JZ_D3ELwOQ" | $(QIP_BIN) run examples/youtube-id-extractor.wasm >> test/latest.txt
 	@printf "%s\n" "module: trim.wasm" >> test/latest.txt
 	@printf %s "  hi  " | $(QIP_BIN) run examples/trim.wasm >> test/latest.txt
 	@printf "%s\n" "module: utf8-must-be-valid.wasm" >> test/latest.txt

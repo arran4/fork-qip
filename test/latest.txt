@@ -217,6 +217,10 @@ module: rgb-to-hex.wasm (rgb())
 #654ff0
 module: tld-validator.wasm
 
+module: youtube-id-extractor.wasm
+dQw4w9WgXcQ
+9bZkp7q19f0
+3JZ_D3ELwOQ
 module: trim.wasm
 hi
 module: utf8-must-be-valid.wasm
