@@ -71,7 +71,7 @@ func BuildViewSourceIndexHTML(recipeAssets []RecipeSourceAsset, markdownRequestP
 	b.Grow(768 + len(recipeAssets)*96 + len(markdownRequestPaths)*64)
 	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>/view-source</title><style>")
 	b.WriteString(":root{font-family:system-ui,sans-serif}body{margin:0;padding:1.5rem 1rem;display:flex;justify-content:center}main{width:100%;max-width:44rem;line-height:1.5}h1{margin:0 0 1rem}h2{margin:1.5rem 0 .5rem}ul{padding-left:1.25rem}")
-	b.WriteString("</style></head><body><main><h1>/view-source</h1>")
+	b.WriteString("</style></head><body><main><h1>View Source</h1>")
 	b.WriteString("<h2>Recipes</h2><ul>")
 	for _, asset := range recipeAssets {
 		href := requestPathForHref(asset.RequestPath)

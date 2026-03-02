@@ -229,8 +229,8 @@ func TestRunRouteWARCIncludeSourceAddsViewSourceRecords(t *testing.T) {
 	if !strings.Contains(got, "WARC-Target-URI: http://qip.local/view-source/recipes/text/markdown/10-markdown-basic.wasm\r\n") {
 		t.Fatalf("missing wasm source record")
 	}
-	if !strings.Contains(got, "<h1>/view-source</h1>") {
-		t.Fatalf("missing view-source index HTML content")
+	if !strings.Contains(got, "<h1>View Source</h1>") {
+		t.Fatalf("missing View Source heading")
 	}
 	if !strings.Contains(got, "<h2>Recipes</h2>") {
 		t.Fatalf("missing recipes heading in view-source index")
