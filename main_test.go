@@ -738,6 +738,31 @@ func TestScanRecipeModuleStampsDetectsChanges(t *testing.T) {
 	}
 }
 
+func TestScanRecipeModuleStampsSupportsSymlinkedRecipeModules(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+	recipeDir := filepath.Join(root, "text", "markdown")
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	wasmPath := filepath.Join(external, "10-linked.wasm")
+	if err := os.WriteFile(wasmPath, []byte{0x00, 0x61, 0x73, 0x6d}, 0o644); err != nil {
+		t.Fatalf("write wasm: %v", err)
+	}
+	if err := os.Symlink(wasmPath, filepath.Join(recipeDir, "10-linked.wasm")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	stamps, err := scanRecipeModuleStamps(root)
+	if err != nil {
+		t.Fatalf("scanRecipeModuleStamps error: %v", err)
+	}
+	if _, ok := stamps["text/markdown/10-linked.wasm"]; !ok {
+		t.Fatalf("expected stamp for symlinked recipe module")
+	}
+}
+
 func TestLoadRecipeChainsIgnoresNonWasm(t *testing.T) {
 	root := t.TempDir()
 	recipeDir := filepath.Join(root, "text", "markdown")
@@ -768,6 +793,40 @@ func TestLoadRecipeChainsIgnoresNonWasm(t *testing.T) {
 
 	chain, ok := chains["text/markdown"]
 	if !ok || chain == nil {
+		t.Fatalf("expected text/markdown chain")
+	}
+	if got := len(digests["text/markdown"]); got != 1 {
+		t.Fatalf("digest count=%d, want 1", got)
+	}
+}
+
+func TestLoadRecipeChainsSupportsSymlinkedRecipeModules(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(external, "text", "markdown"), 0o755); err != nil {
+		t.Fatalf("mkdir external: %v", err)
+	}
+	wasmBytes, err := os.ReadFile(filepath.Join("examples", "hello.wasm"))
+	if err != nil {
+		t.Fatalf("read wasm fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "text", "markdown", "10-linked.wasm"), wasmBytes, 0o644); err != nil {
+		t.Fatalf("write linked wasm: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(external, "text"), filepath.Join(root, "text")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	chains, digests, err := loadRecipeChains(context.Background(), root, options{})
+	if err != nil {
+		t.Fatalf("loadRecipeChains error: %v", err)
+	}
+	t.Cleanup(func() {
+		closePipelines(context.Background(), chains)
+	})
+
+	if _, ok := chains["text/markdown"]; !ok {
 		t.Fatalf("expected text/markdown chain")
 	}
 	if got := len(digests["text/markdown"]); got != 1 {
@@ -898,6 +957,45 @@ func TestLoadFormModules(t *testing.T) {
 	wantDigest := sha256.Sum256(wasmBytes)
 	if got := digests["contact"]; got != wantDigest {
 		t.Fatalf("contact digest mismatch")
+	}
+}
+
+func TestLoadFormModulesSupportsSymlinkedWasmAndIgnoresNonWasmSymlink(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+
+	wasmBytes, err := os.ReadFile(filepath.Join("examples", "hello.wasm"))
+	if err != nil {
+		t.Fatalf("read wasm fixture: %v", err)
+	}
+	externalWasm := filepath.Join(external, "contact.wasm")
+	if err := os.WriteFile(externalWasm, wasmBytes, 0o644); err != nil {
+		t.Fatalf("write external wasm: %v", err)
+	}
+	externalText := filepath.Join(external, "commonmark-spec-0.31.2.txt")
+	if err := os.WriteFile(externalText, []byte("spec"), 0o644); err != nil {
+		t.Fatalf("write external text: %v", err)
+	}
+
+	if err := os.Symlink(externalWasm, filepath.Join(root, "contact.wasm")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := os.Symlink(externalText, filepath.Join(root, "commonmark-spec-0.31.2.txt")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	modules, digests, err := loadFormModules(root)
+	if err != nil {
+		t.Fatalf("loadFormModules error: %v", err)
+	}
+	if len(modules) != 1 {
+		t.Fatalf("module count=%d, want 1", len(modules))
+	}
+	if len(digests) != 1 {
+		t.Fatalf("digest count=%d, want 1", len(digests))
+	}
+	if !bytes.Equal(modules["contact"], wasmBytes) {
+		t.Fatalf("contact module bytes mismatch")
 	}
 }
 
