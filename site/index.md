@@ -2,31 +2,63 @@
 
 ## Small, secure, and predictable software components
 
-`qip` is a tool for running vibe-coded WebAssembly modules in a strict, composable pipeline. Each module does one focused job: parse, validate, transform, render, and so on.
+`qip` is a tool for running vibe-coded WebAssembly modules in a strict, composable pipeline. Each module does one focused job: parser, validator, shader, converter, renderer, and so on.
 
-It lets you process text, data, and images, then compose modules into ever greater units, such as a website, an HTTP server, or an image effect pipeline.
+It lets you process text/images/data then compose modules into ever greater units such as a website or image effect pipeline.
 
-I like to think of `qip` as “React components but for everything (and that run anywhere).”
+Think of it as “React components but for everything and that run anywhere.”
 
 Planned host integrations include Swift, React, and Elixir, pushing further toward write once, run anywhere.
 
 ## Install
 
-```sh
+```bash
 go install github.com/royalicing/qip@latest
 ```
 
 ## Text
 
-TODO: add Markdown example. Show using `qip comply` to validate against CommonMark.
+TODO: add word count example.
 
 ## Images
 
 TODO: add image processing pipeline.
 
+## SVG icons
+
+```bash
+curl https://unpkg.com/lucide-static@0.575.0/icons/cog.svg \
+| qip run examples/svg-recolor-current-color.wasm '?color_rgba=0xff7722ff' \
+examples/svg-rasterize.wasm \
+examples/bmp-to-ico.wasm \
+> cog.ico
+```
+
+<form>
+    <qip-preview>
+        <source src="/view-source/dynamic/svg-recolor-current-color.wasm" type="application/wasm" data-uniform-color_rgba="0xff7722ff" />
+        <source src="/view-source/dynamic/svg-rasterize.wasm" type="application/wasm" />
+        <source src="/view-source/dynamic/bmp-to-ico.wasm" type="application/wasm" />
+        <textarea name="input"></textarea>
+        <output name="output"></output>
+    </qip-preview>
+</form>
+
+## Markdown
+
+TODO: add Markdown example. Show using `qip comply` to validate against CommonMark.
+
+```bash
+wget https://raw.githubusercontent.com/commonmark/commonmark-spec/refs/heads/master/spec.txt
+```
+
 ## Websites
 
 TODO: show how to combine all of this into a website.
+
+## Vibe once, run everywhere
+
+TODO: explain why we’d want to invest into a particular implementation and run that everywhere.
 
 ## The problems with software today
 

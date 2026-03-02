@@ -14,7 +14,7 @@ qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <m
 
 ## Examples In This Repo
 
-```sh
+```bash
 # Expects that the examples/e164.wasm module produces normalized phone numbers, and preserves empty input.
 qip comply examples/e164.wasm --with compliance/e164.comply.wasm --with compliance/preserve-empty.wasm
 

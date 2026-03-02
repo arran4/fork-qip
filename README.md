@@ -16,7 +16,7 @@ Planned host integrations include Swift, React, and Elixir, making reusable logi
 
 ## Install
 
-```sh
+```bash
 go install github.com/royalicing/qip@latest
 ```
 
@@ -429,6 +429,6 @@ The run-module contract (caps, output semantics, and optional content type metad
 
 ## Building the site
 
-```sh
+```bash
 go install github.com/royalicing/qip@latest && make site-static
 ```

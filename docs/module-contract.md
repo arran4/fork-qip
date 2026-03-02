@@ -62,7 +62,7 @@ CLI syntax:
 
 Examples:
 
-```sh
+```bash
 # i32 uniform
 qip run examples/text-to-bmp.wasm '?cols=120'
 
