@@ -118,6 +118,12 @@ fn matInverse(m: Mat) ?Mat {
     return Mat{ .a = a, .b = b, .c = c, .d = d, .tx = tx, .ty = ty };
 }
 
+fn matMaxScale(m: Mat) f32 {
+    const sx = std.math.sqrt(m.a * m.a + m.b * m.b);
+    const sy = std.math.sqrt(m.c * m.c + m.d * m.d);
+    return if (sx > sy) sx else sy;
+}
+
 fn strEq(a: []const u8, b: []const u8) bool {
     if (a.len != b.len) return false;
     var i: usize = 0;
@@ -348,6 +354,68 @@ fn drawRect(ctx: *ParserCtx, transform: Mat, color: Color, rect: Rect) void {
     }
 }
 
+fn drawRectStroke(ctx: *ParserCtx, transform: Mat, color: Color, rect: Rect, stroke_width: f32) void {
+    if (!(rect.set_w and rect.set_h)) return;
+    if (stroke_width <= 0) return;
+    const inv = matInverse(transform) orelse return;
+    const half_w = stroke_width * 0.5;
+    const ox0_local = rect.x - half_w;
+    const oy0_local = rect.y - half_w;
+    const ox1_local = rect.x + rect.w + half_w;
+    const oy1_local = rect.y + rect.h + half_w;
+    const outer_corners = [_][2]f32{
+        matApply(transform, ox0_local, oy0_local),
+        matApply(transform, ox1_local, oy0_local),
+        matApply(transform, ox0_local, oy1_local),
+        matApply(transform, ox1_local, oy1_local),
+    };
+    var min_x = outer_corners[0][0];
+    var max_x = outer_corners[0][0];
+    var min_y = outer_corners[0][1];
+    var max_y = outer_corners[0][1];
+    for (outer_corners[1..]) |pt| {
+        if (pt[0] < min_x) min_x = pt[0];
+        if (pt[0] > max_x) max_x = pt[0];
+        if (pt[1] < min_y) min_y = pt[1];
+        if (pt[1] > max_y) max_y = pt[1];
+    }
+    var x0: i32 = @intFromFloat(@floor(min_x));
+    var y0: i32 = @intFromFloat(@floor(min_y));
+    var x1: i32 = @intFromFloat(@ceil(max_x));
+    var y1: i32 = @intFromFloat(@ceil(max_y));
+    if (x1 < 0 or y1 < 0) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= @as(i32, @intCast(ctx.width))) x1 = @as(i32, @intCast(ctx.width)) - 1;
+    if (y1 >= @as(i32, @intCast(ctx.height))) y1 = @as(i32, @intCast(ctx.height)) - 1;
+
+    const ix0 = rect.x + half_w;
+    const iy0 = rect.y + half_w;
+    const ix1 = rect.x + rect.w - half_w;
+    const iy1 = rect.y + rect.h - half_w;
+    const has_inner = ix0 <= ix1 and iy0 <= iy1;
+
+    var y: i32 = y0;
+    while (y <= y1) : (y += 1) {
+        var x: i32 = x0;
+        while (x <= x1) : (x += 1) {
+            const px = @as(f32, @floatFromInt(x)) + 0.5;
+            const py = @as(f32, @floatFromInt(y)) + 0.5;
+            const local = matApply(inv, px, py);
+
+            if (local[0] < ox0_local or local[0] > ox1_local or local[1] < oy0_local or local[1] > oy1_local) continue;
+
+            var in_inner = false;
+            if (has_inner) {
+                in_inner = local[0] >= ix0 and local[0] <= ix1 and local[1] >= iy0 and local[1] <= iy1;
+            }
+            if (!in_inner) {
+                setPixel(ctx, x, y, color);
+            }
+        }
+    }
+}
+
 fn drawCircle(ctx: *ParserCtx, transform: Mat, color: Color, circle: Circle) void {
     if (!circle.set_r) return;
     const inv = matInverse(transform) orelse return;
@@ -375,6 +443,46 @@ fn drawCircle(ctx: *ParserCtx, transform: Mat, color: Color, circle: Circle) voi
             const dx = local[0] - circle.cx;
             const dy = local[1] - circle.cy;
             if (dx * dx + dy * dy <= r2) {
+                setPixel(ctx, x, y, color);
+            }
+        }
+    }
+}
+
+fn drawCircleStroke(ctx: *ParserCtx, transform: Mat, color: Color, circle: Circle, stroke_width: f32) void {
+    if (!circle.set_r) return;
+    if (stroke_width <= 0) return;
+    const inv = matInverse(transform) orelse return;
+    const center = matApply(transform, circle.cx, circle.cy);
+    const half_w = stroke_width * 0.5;
+    const outer_r = circle.r + half_w;
+    if (outer_r <= 0) return;
+    const inner_r = if (circle.r - half_w > 0) circle.r - half_w else 0.0;
+    const rx_outer = outer_r * std.math.sqrt(transform.a * transform.a + transform.c * transform.c);
+    const ry_outer = outer_r * std.math.sqrt(transform.b * transform.b + transform.d * transform.d);
+    var x0: i32 = @intFromFloat(@floor(center[0] - rx_outer));
+    var x1: i32 = @intFromFloat(@ceil(center[0] + rx_outer));
+    var y0: i32 = @intFromFloat(@floor(center[1] - ry_outer));
+    var y1: i32 = @intFromFloat(@ceil(center[1] + ry_outer));
+    if (x1 < 0 or y1 < 0) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= @as(i32, @intCast(ctx.width))) x1 = @as(i32, @intCast(ctx.width)) - 1;
+    if (y1 >= @as(i32, @intCast(ctx.height))) y1 = @as(i32, @intCast(ctx.height)) - 1;
+    const outer_r2 = outer_r * outer_r;
+    const inner_r2 = inner_r * inner_r;
+
+    var y: i32 = y0;
+    while (y <= y1) : (y += 1) {
+        var x: i32 = x0;
+        while (x <= x1) : (x += 1) {
+            const px = @as(f32, @floatFromInt(x)) + 0.5;
+            const py = @as(f32, @floatFromInt(y)) + 0.5;
+            const local = matApply(inv, px, py);
+            const dx = local[0] - circle.cx;
+            const dy = local[1] - circle.cy;
+            const d2 = dx * dx + dy * dy;
+            if (d2 <= outer_r2 and d2 >= inner_r2) {
                 setPixel(ctx, x, y, color);
             }
         }
@@ -462,7 +570,81 @@ fn parsePoints(value: []const u8, xs: *[MAX_POINTS]f32, ys: *[MAX_POINTS]f32, co
     }
 }
 
-fn parseAttributes(input: []const u8, idx: *usize, base_fill: Color, base_transform: Mat, rect: *Rect, circle: *Circle, xs: *[MAX_POINTS]f32, ys: *[MAX_POINTS]f32, poly_count: *usize, attr_fill: *Color, fill_set: *bool, attr_transform: *Mat, transform_set: *bool, self_closing: *bool) void {
+fn pointSegmentDistSq(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) f32 {
+    const vx = bx - ax;
+    const vy = by - ay;
+    const wx = px - ax;
+    const wy = py - ay;
+    const vv = vx * vx + vy * vy;
+    if (vv <= 0.0000001) {
+        return wx * wx + wy * wy;
+    }
+    var t = (wx * vx + wy * vy) / vv;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    const cx = ax + t * vx;
+    const cy = ay + t * vy;
+    const dx = px - cx;
+    const dy = py - cy;
+    return dx * dx + dy * dy;
+}
+
+fn drawPolygonStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width: f32, xs: *const [MAX_POINTS]f32, ys: *const [MAX_POINTS]f32, count: usize) void {
+    if (count < 2) return;
+    if (stroke_width <= 0) return;
+    const inv = matInverse(transform) orelse return;
+    const half_w = stroke_width * 0.5;
+    const half_w2 = half_w * half_w;
+    var min_x = std.math.inf(f32);
+    var min_y = std.math.inf(f32);
+    var max_x = -std.math.inf(f32);
+    var max_y = -std.math.inf(f32);
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const pt = matApply(transform, xs[i], ys[i]);
+        if (pt[0] < min_x) min_x = pt[0];
+        if (pt[0] > max_x) max_x = pt[0];
+        if (pt[1] < min_y) min_y = pt[1];
+        if (pt[1] > max_y) max_y = pt[1];
+    }
+    const pad = half_w * matMaxScale(transform) + 1.0;
+    var x0: i32 = @intFromFloat(@floor(min_x - pad));
+    var y0: i32 = @intFromFloat(@floor(min_y - pad));
+    var x1: i32 = @intFromFloat(@ceil(max_x + pad));
+    var y1: i32 = @intFromFloat(@ceil(max_y + pad));
+    if (x1 < 0 or y1 < 0) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= @as(i32, @intCast(ctx.width))) x1 = @as(i32, @intCast(ctx.width)) - 1;
+    if (y1 >= @as(i32, @intCast(ctx.height))) y1 = @as(i32, @intCast(ctx.height)) - 1;
+
+    var y: i32 = y0;
+    while (y <= y1) : (y += 1) {
+        var x: i32 = x0;
+        while (x <= x1) : (x += 1) {
+            const px = @as(f32, @floatFromInt(x)) + 0.5;
+            const py = @as(f32, @floatFromInt(y)) + 0.5;
+            const local = matApply(inv, px, py);
+
+            var near_edge = false;
+            var j: usize = count - 1;
+            var k: usize = 0;
+            while (k < count) : (k += 1) {
+                const d2 = pointSegmentDistSq(local[0], local[1], xs[j], ys[j], xs[k], ys[k]);
+                if (d2 <= half_w2) {
+                    near_edge = true;
+                    break;
+                }
+                j = k;
+            }
+            if (near_edge) {
+                setPixel(ctx, x, y, color);
+            }
+        }
+    }
+}
+
+fn parseAttributes(input: []const u8, idx: *usize, base_fill: Color, base_stroke: Color, base_stroke_width: f32, base_transform: Mat, rect: *Rect, circle: *Circle, xs: *[MAX_POINTS]f32, ys: *[MAX_POINTS]f32, poly_count: *usize, attr_fill: *Color, fill_set: *bool, attr_stroke: *Color, stroke_set: *bool, attr_stroke_width: *f32, stroke_width_set: *bool, attr_transform: *Mat, transform_set: *bool, self_closing: *bool) void {
     while (idx.* < input.len) {
         skipWs(input, idx);
         if (idx.* >= input.len) return;
@@ -489,6 +671,16 @@ fn parseAttributes(input: []const u8, idx: *usize, base_fill: Color, base_transf
             if (parseColor(value)) |c| {
                 attr_fill.* = c;
                 fill_set.* = true;
+            }
+        } else if (strEq(name, "stroke")) {
+            if (parseColor(value)) |c| {
+                attr_stroke.* = c;
+                stroke_set.* = true;
+            }
+        } else if (strEq(name, "stroke-width")) {
+            if (parseNumber(value)) |v| {
+                attr_stroke_width.* = if (v > 0) v else 0;
+                stroke_width_set.* = true;
             }
         } else if (strEq(name, "transform")) {
             attr_transform.* = parseTransform(value);
@@ -533,6 +725,8 @@ fn parseAttributes(input: []const u8, idx: *usize, base_fill: Color, base_transf
         }
     }
     _ = base_fill;
+    _ = base_stroke;
+    _ = base_stroke_width;
     _ = base_transform;
 }
 
@@ -561,7 +755,7 @@ fn skipSpecial(input: []const u8, idx: *usize) void {
     }
 }
 
-fn parseElements(ctx: *ParserCtx, idx: *usize, transform: Mat, fill: Color, end_tag: ?[]const u8) void {
+fn parseElements(ctx: *ParserCtx, idx: *usize, transform: Mat, fill: Color, stroke: Color, stroke_width: f32, end_tag: ?[]const u8) void {
     const input = ctx.input;
     while (idx.* < input.len) {
         while (idx.* < input.len and input[idx.*] != '<') idx.* += 1;
@@ -591,25 +785,34 @@ fn parseElements(ctx: *ParserCtx, idx: *usize, transform: Mat, fill: Color, end_
         var poly_count: usize = 0;
         var attr_fill = fill;
         var fill_set = false;
+        var attr_stroke = stroke;
+        var stroke_set = false;
+        var attr_stroke_width = stroke_width;
+        var stroke_width_set = false;
         var attr_transform = matIdentity();
         var transform_set = false;
         var self_closing = false;
 
-        parseAttributes(input, idx, fill, transform, &rect, &circle, &xs, &ys, &poly_count, &attr_fill, &fill_set, &attr_transform, &transform_set, &self_closing);
+        parseAttributes(input, idx, fill, stroke, stroke_width, transform, &rect, &circle, &xs, &ys, &poly_count, &attr_fill, &fill_set, &attr_stroke, &stroke_set, &attr_stroke_width, &stroke_width_set, &attr_transform, &transform_set, &self_closing);
 
         const final_transform = if (transform_set) matMul(transform, attr_transform) else transform;
         const final_fill = if (fill_set) attr_fill else fill;
+        const final_stroke = if (stroke_set) attr_stroke else stroke;
+        const final_stroke_width = if (stroke_width_set) attr_stroke_width else stroke_width;
 
         if (strEq(name, "g") or strEq(name, "svg")) {
             if (!self_closing) {
-                parseElements(ctx, idx, final_transform, final_fill, name);
+                parseElements(ctx, idx, final_transform, final_fill, final_stroke, final_stroke_width, name);
             }
         } else if (strEq(name, "rect")) {
             drawRect(ctx, final_transform, final_fill, rect);
+            drawRectStroke(ctx, final_transform, final_stroke, rect, final_stroke_width);
         } else if (strEq(name, "circle")) {
             drawCircle(ctx, final_transform, final_fill, circle);
+            drawCircleStroke(ctx, final_transform, final_stroke, circle, final_stroke_width);
         } else if (strEq(name, "polygon")) {
             drawPolygon(ctx, final_transform, final_fill, &xs, &ys, poly_count);
+            drawPolygonStroke(ctx, final_transform, final_stroke, final_stroke_width, &xs, &ys, poly_count);
         }
     }
 }
@@ -708,7 +911,8 @@ export fn run(input_size: u32) u32 {
     };
     var idx: usize = 0;
     const default_fill = Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
-    parseElements(&ctx, &idx, matIdentity(), default_fill, null);
+    const default_stroke = Color{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    parseElements(&ctx, &idx, matIdentity(), default_fill, default_stroke, 1.0, null);
 
     return ctx.out_len;
 }
@@ -779,4 +983,27 @@ test "svg-rasterize pixel pattern" {
     try std.testing.expectEqual(@as(u8, 0x00), clear.g);
     try std.testing.expectEqual(@as(u8, 0x00), clear.r);
     try std.testing.expectEqual(@as(u8, 0x00), clear.a);
+}
+
+test "svg-rasterize stroke support" {
+    const input =
+        "<svg width=\"12\" height=\"12\">\n" ++
+        "  <rect x=\"1\" y=\"1\" width=\"10\" height=\"10\" fill=\"none\" stroke=\"#ff00ff\" stroke-width=\"2\"/>\n" ++
+        "</svg>";
+
+    const output = renderForTest(input);
+    const width: u32 = 12;
+    const height: u32 = 12;
+
+    const stroke_px = pixelAt(output, width, height, 1, 6);
+    try std.testing.expectEqual(@as(u8, 0xFF), stroke_px.b);
+    try std.testing.expectEqual(@as(u8, 0x00), stroke_px.g);
+    try std.testing.expectEqual(@as(u8, 0xFF), stroke_px.r);
+    try std.testing.expectEqual(@as(u8, 0xFF), stroke_px.a);
+
+    const center = pixelAt(output, width, height, 6, 6);
+    try std.testing.expectEqual(@as(u8, 0x00), center.b);
+    try std.testing.expectEqual(@as(u8, 0x00), center.g);
+    try std.testing.expectEqual(@as(u8, 0x00), center.r);
+    try std.testing.expectEqual(@as(u8, 0x00), center.a);
 }
