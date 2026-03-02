@@ -1,4 +1,4 @@
-.PHONY: compliance examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test test-go
+.PHONY: compliance examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test test-go site-static
 
 default: qip compliance examples recipes
 
@@ -10,6 +10,7 @@ ZIG_WASM_FLAGS := -target wasm32-freestanding -O ReleaseSmall -fno-entry -rdynam
 GO_FIX_PKGS := ./cmd/... ./internal/... ./tools/...
 GO_FMT_PKGS := . ./cmd/... ./internal/... ./tools/...
 GO_TEST_PKGS := . ./cmd/... ./internal/... ./tools/...
+QIP_BIN ?= ./qip
 QIP_GO_DEPS := main.go $(wildcard cmd/*.go) $(wildcard internal/*.go) $(wildcard internal/*/*.go)
 
 qip: go.mod go.sum $(QIP_GO_DEPS)
@@ -88,70 +89,70 @@ test-snapshot: qip examples
 	@mkdir -p test
 	@rm -f test/latest.txt
 	@printf "%s\n" "module: base64-encode.wasm" >> test/latest.txt
-	@printf %s "hello" | ./qip run examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "hello" | $(QIP_BIN) run examples/base64-encode.wasm >> test/latest.txt
 	@printf "%s\n" "module: base64-encode.wasm | base64-decode.wasm" >> test/latest.txt
-	@printf %s "hello" | ./qip run examples/base64-encode.wasm examples/base64-decode.wasm >> test/latest.txt
+	@printf %s "hello" | $(QIP_BIN) run examples/base64-encode.wasm examples/base64-decode.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: bmp-to-ico.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "424D3A0000000000000036000000280000000100000001000000010018000000000004000000000000000000000000000000000000000000FF00" | xxd -r -p | ./qip run examples/bmp-to-ico.wasm examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "424D3A0000000000000036000000280000000100000001000000010018000000000004000000000000000000000000000000000000000000FF00" | xxd -r -p | $(QIP_BIN) run examples/bmp-to-ico.wasm examples/base64-encode.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: crc.wasm" >> test/latest.txt
-	@printf %s "abc" | ./qip run examples/crc.wasm >> test/latest.txt
+	@printf %s "abc" | $(QIP_BIN) run examples/crc.wasm >> test/latest.txt
 	@printf "%s\n" "module: css-class-validator.wasm" >> test/latest.txt
-	@printf %s "btn-primary" | ./qip run examples/css-class-validator.wasm >> test/latest.txt
+	@printf %s "btn-primary" | $(QIP_BIN) run examples/css-class-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: e164.wasm" >> test/latest.txt
-	@printf %s "+14155552671" | ./qip run examples/e164.wasm >> test/latest.txt
+	@printf %s "+14155552671" | $(QIP_BIN) run examples/e164.wasm >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | ./qip run examples/zlib-compress.wasm examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress.wasm examples/base64-encode.wasm >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress.wasm | zlib-decompress.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | ./qip run examples/zlib-compress.wasm examples/zlib-decompress.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress.wasm examples/zlib-decompress.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress-fixed-huffman.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | ./qip run examples/zlib-compress-fixed-huffman.wasm examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress-fixed-huffman.wasm examples/base64-encode.wasm >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress-fixed-huffman.wasm | zlib-decompress.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | ./qip run examples/zlib-compress-fixed-huffman.wasm examples/zlib-decompress.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress-fixed-huffman.wasm examples/zlib-decompress.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress-dynamic-huffman.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | ./qip run examples/zlib-compress-dynamic-huffman.wasm examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress-dynamic-huffman.wasm examples/base64-encode.wasm >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress-dynamic-huffman.wasm | zlib-decompress.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | ./qip run examples/zlib-compress-dynamic-huffman.wasm examples/zlib-decompress.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress-dynamic-huffman.wasm examples/zlib-decompress.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: hello.wasm" >> test/latest.txt
-	@printf %s "World" | ./qip run examples/hello.wasm >> test/latest.txt
+	@printf %s "World" | $(QIP_BIN) run examples/hello.wasm >> test/latest.txt
 	@printf "%s\n" "module: hello-c.wasm" >> test/latest.txt
-	@printf %s "World" | ./qip run examples/hello-c.wasm >> test/latest.txt
+	@printf %s "World" | $(QIP_BIN) run examples/hello-c.wasm >> test/latest.txt
 	@printf "%s\n" "module: hello-zig.wasm" >> test/latest.txt
-	@printf %s "World" | ./qip run examples/hello-zig.wasm >> test/latest.txt
+	@printf %s "World" | $(QIP_BIN) run examples/hello-zig.wasm >> test/latest.txt
 	@printf "%s\n" "module: hex-to-rgb.wasm" >> test/latest.txt
-	@printf %s "#ff8800" | ./qip run examples/hex-to-rgb.wasm >> test/latest.txt
+	@printf %s "#ff8800" | $(QIP_BIN) run examples/hex-to-rgb.wasm >> test/latest.txt
 	@printf "%s\n" "module: html-id-validator.wasm" >> test/latest.txt
-	@printf %s "main-content" | ./qip run examples/html-id-validator.wasm >> test/latest.txt
+	@printf %s "main-content" | $(QIP_BIN) run examples/html-id-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: html-input-name-validator.wasm" >> test/latest.txt
-	@printf %s "email" | ./qip run examples/html-input-name-validator.wasm >> test/latest.txt
+	@printf %s "email" | $(QIP_BIN) run examples/html-input-name-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: html-aria-extractor.wasm" >> test/latest.txt
-	@printf %s "<a href=\"/a\">Go</a><button>Push</button><h2>Title</h2><input type=\"radio\" aria-label=\"Yes\"><div role=\"checkbox\" aria-label=\"Ok\"></div>" | ./qip run examples/html-aria-extractor.wasm >> test/latest.txt
+	@printf %s "<a href=\"/a\">Go</a><button>Push</button><h2>Title</h2><input type=\"radio\" aria-label=\"Yes\"><div role=\"checkbox\" aria-label=\"Ok\"></div>" | $(QIP_BIN) run examples/html-aria-extractor.wasm >> test/latest.txt
 	@printf "%s\n" "module: html-tag-validator.wasm" >> test/latest.txt
-	@printf %s "div" | ./qip run examples/html-tag-validator.wasm >> test/latest.txt
+	@printf %s "div" | $(QIP_BIN) run examples/html-tag-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: luhn.wasm" >> test/latest.txt
-	@printf %s "49927398716" | ./qip run examples/luhn.wasm >> test/latest.txt
+	@printf %s "49927398716" | $(QIP_BIN) run examples/luhn.wasm >> test/latest.txt
 	@printf "%s\n" "module: markdown-basic.wasm" >> test/latest.txt
-	@printf "%b" "# Title\nHello **World**\n" | ./qip run examples/markdown-basic.wasm >> test/latest.txt
+	@printf "%b" "# Title\nHello **World**\n" | $(QIP_BIN) run examples/markdown-basic.wasm >> test/latest.txt
 	@printf "%s\n" "module: markdown-basic.wasm (table)" >> test/latest.txt
-	@printf "%b" '| A | B |\n| --- | --- |\n| `x` | **y** |\n' | ./qip run examples/markdown-basic.wasm >> test/latest.txt
+	@printf "%b" '| A | B |\n| --- | --- |\n| `x` | **y** |\n' | $(QIP_BIN) run examples/markdown-basic.wasm >> test/latest.txt
 	@printf "%s\n" "module: markdown-basic.wasm | html-page-wrap.wasm" >> test/latest.txt
-	@printf "%b" "# Title\nHello **World**\n" | ./qip run examples/markdown-basic.wasm examples/html-page-wrap.wasm >> test/latest.txt
+	@printf "%b" "# Title\nHello **World**\n" | $(QIP_BIN) run examples/markdown-basic.wasm examples/html-page-wrap.wasm >> test/latest.txt
 	@printf "%s\n" "module: rgb-to-hex.wasm" >> test/latest.txt
-	@printf %s "255,0,170" | ./qip run examples/rgb-to-hex.wasm >> test/latest.txt
+	@printf %s "255,0,170" | $(QIP_BIN) run examples/rgb-to-hex.wasm >> test/latest.txt
 	@printf "%s\n" "module: rgb-to-hex.wasm (rgb())" >> test/latest.txt
-	@printf %s " rgb( 101, 79, 240 ) " | ./qip run examples/rgb-to-hex.wasm >> test/latest.txt
+	@printf %s " rgb( 101, 79, 240 ) " | $(QIP_BIN) run examples/rgb-to-hex.wasm >> test/latest.txt
 	@printf "%s\n" "module: tld-validator.wasm" >> test/latest.txt
-	@printf %s "com" | ./qip run examples/tld-validator.wasm >> test/latest.txt
+	@printf %s "com" | $(QIP_BIN) run examples/tld-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: trim.wasm" >> test/latest.txt
-	@printf %s "  hi  " | ./qip run examples/trim.wasm >> test/latest.txt
+	@printf %s "  hi  " | $(QIP_BIN) run examples/trim.wasm >> test/latest.txt
 	@printf "%s\n" "module: utf8-must-be-valid.wasm" >> test/latest.txt
-	@printf %s "hello" | ./qip run examples/utf8-must-be-valid.wasm >> test/latest.txt
+	@printf %s "hello" | $(QIP_BIN) run examples/utf8-must-be-valid.wasm >> test/latest.txt
 	@printf "%s\n" "module: wasm-to-js.wasm" >> test/latest.txt
-	@cat examples/hello.wasm | ./qip run examples/wasm-to-js.wasm >> test/latest.txt
+	@cat examples/hello.wasm | $(QIP_BIN) run examples/wasm-to-js.wasm >> test/latest.txt
 
 ZIG_TEST_FILES := $(wildcard examples/*.zig) recipes/text/markdown/10-markdown-basic.zig recipes/text/markdown/19-add-fathom-analytics-script.zig recipes/text/markdown/20-html-page-wrap.zig
 
@@ -165,10 +166,10 @@ test-go:
 	go test $(GO_TEST_PKGS)
 
 site/favicon.ico: qip-logo.svg
-	./qip run -i qip-logo.svg -- examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > $@
+	$(QIP_BIN) run -i qip-logo.svg -- examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > $@
 
 site-static:
-	qip route warc ./site --recipes recipes --forms examples --include-source | qip run examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
+	$(QIP_BIN) route warc ./site --recipes recipes --forms examples --include-source | $(QIP_BIN) run examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
 
 defluff:
 	find . -name '.DS_Store' -type f -delete
