@@ -1,4 +1,4 @@
-.PHONY: compliance examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test test-go site-static
+.PHONY: compliance examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test test-go site-static install
 
 default: qip compliance examples recipes
 
@@ -167,6 +167,9 @@ test-go:
 
 site/favicon.ico: qip-logo.svg
 	$(QIP_BIN) run -i qip-logo.svg -- examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > $@
+
+install:
+	go install github.com/royalicing/qip@latest
 
 site-static:
 	$(QIP_BIN) route warc ./site --recipes recipes --forms examples --include-source | $(QIP_BIN) run examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
