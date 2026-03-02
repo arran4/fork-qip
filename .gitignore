@@ -34,6 +34,7 @@ go.work.sum
 .DS_Store
 tmp/
 __pycache__
+.zig-cache/
 
 qip
 site-static.tar
