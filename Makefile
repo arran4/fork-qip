@@ -83,79 +83,79 @@ recipes: $(patsubst recipes/text/markdown/%.zig,recipes/text/markdown/%.wasm,$(w
 examples: examples-wat-wasm examples-c-wasm examples-zig-wasm
 modules: examples
 
-test: qip examples test-go test-zig test-snapshot
+test: qip modules test-go test-zig test-snapshot
 	diff test/expected.txt test/latest.txt && echo "Snapshots pass."
 
-test-snapshot: qip examples
+test-snapshot: qip modules
 	@mkdir -p test
 	@rm -f test/latest.txt
 	@printf "%s\n" "module: base64-encode.wasm" >> test/latest.txt
-	@printf %s "hello" | $(QIP_BIN) run examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "hello" | $(QIP_BIN) run modules/bytes/base64-encode.wasm >> test/latest.txt
 	@printf "%s\n" "module: base64-encode.wasm | base64-decode.wasm" >> test/latest.txt
-	@printf %s "hello" | $(QIP_BIN) run examples/base64-encode.wasm examples/base64-decode.wasm >> test/latest.txt
+	@printf %s "hello" | $(QIP_BIN) run modules/bytes/base64-encode.wasm modules/utf8/base64-decode.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: bmp-to-ico.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "424D3A0000000000000036000000280000000100000001000000010018000000000004000000000000000000000000000000000000000000FF00" | xxd -r -p | $(QIP_BIN) run examples/bmp-to-ico.wasm examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "424D3A0000000000000036000000280000000100000001000000010018000000000004000000000000000000000000000000000000000000FF00" | xxd -r -p | $(QIP_BIN) run modules/bytes/bmp-to-ico.wasm modules/bytes/base64-encode.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: crc.wasm" >> test/latest.txt
-	@printf %s "abc" | $(QIP_BIN) run examples/crc.wasm >> test/latest.txt
+	@printf %s "abc" | $(QIP_BIN) run modules/bytes/crc.wasm >> test/latest.txt
 	@printf "%s\n" "module: css-class-validator.wasm" >> test/latest.txt
-	@printf %s "btn-primary" | $(QIP_BIN) run examples/css-class-validator.wasm >> test/latest.txt
+	@printf %s "btn-primary" | $(QIP_BIN) run modules/text/css/css-class-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: e164.wasm" >> test/latest.txt
-	@printf %s "+14155552671" | $(QIP_BIN) run examples/e164.wasm >> test/latest.txt
+	@printf %s "+14155552671" | $(QIP_BIN) run modules/utf8/e164.wasm >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress.wasm examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run modules/bytes/zlib-compress.wasm modules/bytes/base64-encode.wasm >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress.wasm | zlib-decompress.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress.wasm examples/zlib-decompress.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run modules/bytes/zlib-compress.wasm modules/bytes/zlib-decompress.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress-fixed-huffman.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress-fixed-huffman.wasm examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run modules/bytes/zlib-compress-fixed-huffman.wasm modules/bytes/base64-encode.wasm >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress-fixed-huffman.wasm | zlib-decompress.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress-fixed-huffman.wasm examples/zlib-decompress.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run modules/bytes/zlib-compress-fixed-huffman.wasm modules/bytes/zlib-decompress.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress-dynamic-huffman.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress-dynamic-huffman.wasm examples/base64-encode.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run modules/bytes/zlib-compress-dynamic-huffman.wasm modules/bytes/base64-encode.wasm >> test/latest.txt
 	@printf "%s\n" "module: zlib-compress-dynamic-huffman.wasm | zlib-decompress.wasm" >> test/latest.txt
-	@printf %s "qip + wasm" | $(QIP_BIN) run examples/zlib-compress-dynamic-huffman.wasm examples/zlib-decompress.wasm >> test/latest.txt
+	@printf %s "qip + wasm" | $(QIP_BIN) run modules/bytes/zlib-compress-dynamic-huffman.wasm modules/bytes/zlib-decompress.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: hello.wasm" >> test/latest.txt
-	@printf %s "World" | $(QIP_BIN) run examples/hello.wasm >> test/latest.txt
+	@printf %s "World" | $(QIP_BIN) run modules/utf8/hello.wasm >> test/latest.txt
 	@printf "%s\n" "module: hello-c.wasm" >> test/latest.txt
-	@printf %s "World" | $(QIP_BIN) run examples/hello-c.wasm >> test/latest.txt
+	@printf %s "World" | $(QIP_BIN) run modules/utf8/hello-c.wasm >> test/latest.txt
 	@printf "%s\n" "module: hello-zig.wasm" >> test/latest.txt
-	@printf %s "World" | $(QIP_BIN) run examples/hello-zig.wasm >> test/latest.txt
+	@printf %s "World" | $(QIP_BIN) run modules/utf8/hello-zig.wasm >> test/latest.txt
 	@printf "%s\n" "module: hex-to-rgb.wasm" >> test/latest.txt
-	@printf %s "#ff8800" | $(QIP_BIN) run examples/hex-to-rgb.wasm >> test/latest.txt
+	@printf %s "#ff8800" | $(QIP_BIN) run modules/utf8/hex-to-rgb.wasm >> test/latest.txt
 	@printf "%s\n" "module: html-id-validator.wasm" >> test/latest.txt
-	@printf %s "main-content" | $(QIP_BIN) run examples/html-id-validator.wasm >> test/latest.txt
+	@printf %s "main-content" | $(QIP_BIN) run modules/text/html/html-id-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: html-input-name-validator.wasm" >> test/latest.txt
-	@printf %s "email" | $(QIP_BIN) run examples/html-input-name-validator.wasm >> test/latest.txt
+	@printf %s "email" | $(QIP_BIN) run modules/text/html/html-input-name-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: html-aria-extractor.wasm" >> test/latest.txt
-	@printf %s "<a href=\"/a\">Go</a><button>Push</button><h2>Title</h2><input type=\"radio\" aria-label=\"Yes\"><div role=\"checkbox\" aria-label=\"Ok\"></div>" | $(QIP_BIN) run examples/html-aria-extractor.wasm >> test/latest.txt
+	@printf %s "<a href=\"/a\">Go</a><button>Push</button><h2>Title</h2><input type=\"radio\" aria-label=\"Yes\"><div role=\"checkbox\" aria-label=\"Ok\"></div>" | $(QIP_BIN) run modules/text/html/html-aria-extractor.wasm >> test/latest.txt
 	@printf "%s\n" "module: html-tag-validator.wasm" >> test/latest.txt
-	@printf %s "div" | $(QIP_BIN) run examples/html-tag-validator.wasm >> test/latest.txt
+	@printf %s "div" | $(QIP_BIN) run modules/text/html/html-tag-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: luhn.wasm" >> test/latest.txt
-	@printf %s "49927398716" | $(QIP_BIN) run examples/luhn.wasm >> test/latest.txt
+	@printf %s "49927398716" | $(QIP_BIN) run modules/utf8/luhn.wasm >> test/latest.txt
 	@printf "%s\n" "module: markdown-basic.wasm" >> test/latest.txt
-	@printf "%b" "# Title\nHello **World**\n" | $(QIP_BIN) run examples/markdown-basic.wasm >> test/latest.txt
+	@printf "%b" "# Title\nHello **World**\n" | $(QIP_BIN) run modules/text/markdown/markdown-basic.wasm >> test/latest.txt
 	@printf "%s\n" "module: markdown-basic.wasm (table)" >> test/latest.txt
-	@printf "%b" '| A | B |\n| --- | --- |\n| `x` | **y** |\n' | $(QIP_BIN) run examples/markdown-basic.wasm >> test/latest.txt
+	@printf "%b" '| A | B |\n| --- | --- |\n| `x` | **y** |\n' | $(QIP_BIN) run modules/text/markdown/markdown-basic.wasm >> test/latest.txt
 	@printf "%s\n" "module: markdown-basic.wasm | html-page-wrap.wasm" >> test/latest.txt
-	@printf "%b" "# Title\nHello **World**\n" | $(QIP_BIN) run examples/markdown-basic.wasm examples/html-page-wrap.wasm >> test/latest.txt
+	@printf "%b" "# Title\nHello **World**\n" | $(QIP_BIN) run modules/text/markdown/markdown-basic.wasm modules/text/html/html-page-wrap.wasm >> test/latest.txt
 	@printf "%s\n" "module: rgb-to-hex.wasm" >> test/latest.txt
-	@printf %s "255,0,170" | $(QIP_BIN) run examples/rgb-to-hex.wasm >> test/latest.txt
+	@printf %s "255,0,170" | $(QIP_BIN) run modules/utf8/rgb-to-hex.wasm >> test/latest.txt
 	@printf "%s\n" "module: rgb-to-hex.wasm (rgb())" >> test/latest.txt
-	@printf %s " rgb( 101, 79, 240 ) " | $(QIP_BIN) run examples/rgb-to-hex.wasm >> test/latest.txt
+	@printf %s " rgb( 101, 79, 240 ) " | $(QIP_BIN) run modules/utf8/rgb-to-hex.wasm >> test/latest.txt
 	@printf "%s\n" "module: tld-validator.wasm" >> test/latest.txt
-	@printf %s "com" | $(QIP_BIN) run examples/tld-validator.wasm >> test/latest.txt
+	@printf %s "com" | $(QIP_BIN) run modules/utf8/tld-validator.wasm >> test/latest.txt
 	@printf "%s\n" "module: youtube-id-extractor.wasm" >> test/latest.txt
-	@printf %s "https://youtu.be/dQw4w9WgXcQ https://www.youtube.com/embed/9bZkp7q19f0 https://www.youtube.com/watch?v=3JZ_D3ELwOQ" | $(QIP_BIN) run examples/youtube-id-extractor.wasm >> test/latest.txt
+	@printf %s "https://youtu.be/dQw4w9WgXcQ https://www.youtube.com/embed/9bZkp7q19f0 https://www.youtube.com/watch?v=3JZ_D3ELwOQ" | $(QIP_BIN) run modules/utf8/youtube-id-extractor.wasm >> test/latest.txt
 	@printf "%s\n" "module: trim.wasm" >> test/latest.txt
-	@printf %s "  hi  " | $(QIP_BIN) run examples/trim.wasm >> test/latest.txt
+	@printf %s "  hi  " | $(QIP_BIN) run modules/utf8/trim.wasm >> test/latest.txt
 	@printf "%s\n" "module: utf8-must-be-valid.wasm" >> test/latest.txt
-	@printf %s "hello" | $(QIP_BIN) run examples/utf8-must-be-valid.wasm >> test/latest.txt
+	@printf %s "hello" | $(QIP_BIN) run modules/utf8/utf8-must-be-valid.wasm >> test/latest.txt
 	@printf "%s\n" "module: wasm-to-js.wasm" >> test/latest.txt
-	@cat examples/hello.wasm | $(QIP_BIN) run examples/wasm-to-js.wasm >> test/latest.txt
+	@cat modules/utf8/hello.wasm | $(QIP_BIN) run modules/bytes/wasm-to-js.wasm >> test/latest.txt
 
 ZIG_TEST_FILES := $(wildcard examples/*.zig) $(wildcard recipes/text/markdown/*.zig)
 
