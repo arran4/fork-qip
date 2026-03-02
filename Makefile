@@ -53,7 +53,7 @@ ZIG_ENV := ZIG_CACHE_DIR=$(ZIG_CACHE_DIR) ZIG_GLOBAL_CACHE_DIR=$(ZIG_GLOBAL_CACH
 examples/c-to-bmp.wasm: examples/c-to-bmp.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
 
-recipes/text/markdown/20-html-page-wrap.wasm: recipes/text/markdown/styles.css
+recipes/text/markdown/20-html-page-wrap.wasm: recipes/text/markdown/styles.css recipes/text/markdown/header.html recipes/text/markdown/footer.html
 
 examples/markdown-basic.wasm: recipes/text/markdown/10-markdown-basic.wasm
 	cp $< $@
