@@ -102,13 +102,13 @@ const Writer = struct {
             if (s[i] == '[') {
                 if (std.mem.indexOfScalarPos(u8, s, i + 1, ']')) |close| {
                     if (close + 1 < s.len and s[close + 1] == '(') {
-                        if (std.mem.indexOfScalarPos(u8, s, close + 2, ')')) |end| {
+                        if (parseInlineLinkDestination(s, close + 2)) |dest| {
                             self.writeSlice("<a href=\"");
-                            self.writeEscaped(s[close + 2 .. end]);
+                            self.writeEscaped(dest.href);
                             self.writeSlice("\">");
                             self.writeInline(s[i + 1 .. close]);
                             self.writeSlice("</a>");
-                            i = end + 1;
+                            i = dest.next;
                             continue;
                         }
                     }
@@ -151,6 +151,40 @@ const Writer = struct {
         }
     }
 };
+
+const ParsedInlineLinkDestination = struct {
+    href: []const u8,
+    next: usize,
+};
+
+fn parseInlineLinkDestination(s: []const u8, start: usize) ?ParsedInlineLinkDestination {
+    var i = start;
+    while (i < s.len and (s[i] == ' ' or s[i] == '\t')) : (i += 1) {}
+    if (i >= s.len) return null;
+
+    if (s[i] == '<') {
+        const href_start = i + 1;
+        if (std.mem.indexOfScalarPos(u8, s, href_start, '>')) |close_angle| {
+            var j = close_angle + 1;
+            while (j < s.len and (s[j] == ' ' or s[j] == '\t')) : (j += 1) {}
+            if (j < s.len and s[j] == ')') {
+                return .{
+                    .href = s[href_start..close_angle],
+                    .next = j + 1,
+                };
+            }
+        }
+        return null;
+    }
+
+    var href_end = i;
+    while (href_end < s.len and s[href_end] != ')') : (href_end += 1) {}
+    if (href_end >= s.len) return null;
+    return .{
+        .href = s[i..href_end],
+        .next = href_end + 1,
+    };
+}
 
 const HtmlBlockType = enum {
     none,
@@ -857,6 +891,16 @@ test "inline code and link" {
     const written = renderMarkdown(input, out[0..]);
     try std.testing.expectEqualStrings(
         "<p>Use <code>code</code> and <a href=\"http://a\">link</a>.</p>\n",
+        out[0..written],
+    );
+}
+
+test "link destination in angle brackets allows parens" {
+    var out: [1024]u8 = undefined;
+    const input = "[WARC archive](<https://en.wikipedia.org/wiki/WARC_(file_format)>)\n";
+    const written = renderMarkdown(input, out[0..]);
+    try std.testing.expectEqualStrings(
+        "<p><a href=\"https://en.wikipedia.org/wiki/WARC_(file_format)\">WARC archive</a></p>\n",
         out[0..written],
     );
 }
