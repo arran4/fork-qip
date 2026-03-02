@@ -172,7 +172,7 @@ install:
 	go install github.com/royalicing/qip@latest
 
 site-static:
-	$(QIP_BIN) route warc ./site --recipes recipes --forms examples --include-source | $(QIP_BIN) run examples/warc-check-broken-links.wasm examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
+	$(QIP_BIN) route warc ./site --recipes recipes --forms examples --view-source | $(QIP_BIN) run examples/warc-check-broken-links.wasm examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
 
 defluff:
 	find . -name '.DS_Store' -type f -delete

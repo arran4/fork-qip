@@ -159,8 +159,8 @@ func TestRunRouteWARCRejectsMethodFlags(t *testing.T) {
 	}
 }
 
-func TestRunRouteWARCIncludeSourceRequiresRecipes(t *testing.T) {
-	err := RunRoute([]string{"warc", "--include-source", "docs"}, RouteConfig{
+func TestRunRouteWARCViewSourceRequiresRecipes(t *testing.T) {
+	err := RunRoute([]string{"warc", "--view-source", "docs"}, RouteConfig{
 		UsageRoute:     "usage route",
 		UsageRouteWarc: "usage route warc",
 		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
@@ -170,12 +170,12 @@ func TestRunRouteWARCIncludeSourceRequiresRecipes(t *testing.T) {
 			return qinternal.InProcessHTTPResponse{}, nil
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "--include-source requires --recipes") {
+	if err == nil || !strings.Contains(err.Error(), "--view-source requires --recipes") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestRunRouteWARCIncludeSourceAddsViewSourceRecords(t *testing.T) {
+func TestRunRouteWARCViewSourceAddsViewSourceRecords(t *testing.T) {
 	recipesRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(recipesRoot, "text", "markdown"), 0o755); err != nil {
 		t.Fatalf("mkdir recipes: %v", err)
@@ -193,14 +193,14 @@ func TestRunRouteWARCIncludeSourceAddsViewSourceRecords(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := RunRoute([]string{"warc", "--include-source", "--recipes", recipesRoot, "docs"}, RouteConfig{
+	err := RunRoute([]string{"warc", "--view-source", "--recipes", recipesRoot, "docs"}, RouteConfig{
 		UsageRoute:     "usage route",
 		UsageRouteWarc: "usage route warc",
 		DefaultMode:    "dev",
 		Stdout:         &out,
 		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
-			if !request.IncludeSource {
-				t.Fatalf("expected IncludeSource to be true")
+			if !request.ViewSource {
+				t.Fatalf("expected ViewSource to be true")
 			}
 			return []string{"/a", "/guide", "/guide.md"}, nil
 		},

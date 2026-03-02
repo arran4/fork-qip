@@ -97,7 +97,7 @@ type options struct {
 	mode                   runtimeMode
 	contentTypeChecking    contentTypeCheckingMode
 	trustFirstStageContent bool
-	includeSource          bool
+	viewSource             bool
 }
 
 const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  route    Resolve routed paths and export route artifacts\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
@@ -105,12 +105,12 @@ const usageRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm mod
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value ...] ..."
 const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
-const usageDev = "Usage: qip dev <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [--include-source] [-p <port>] [-v|--verbose]"
+const usageDev = "Usage: qip dev <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [--view-source] [-p <port>] [-v|--verbose]"
 const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  get      Resolve one GET path through the dev router and print the result\n  head     Resolve one HEAD path through the dev router and print headers\n  list     List routed paths and content types\n  warc     Archive the routed site and write a minimal WARC file"
 const usageRouteGet = "Usage: qip route get <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteHead = "Usage: qip route head <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
 const usageRouteList = "Usage: qip route list <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
-const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [--host <host>] [--include-source] [-o <warc file or ->] [-v|--verbose]"
+const usageRouteWarc = "Usage: qip route warc <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [--host <host>] [--view-source] [-o <warc file or ->] [-v|--verbose]"
 const usageForm = "Usage: qip form [-v|--verbose] <wasm module URL or file>"
 const usageHelp = "Usage: qip help [command]"
 
@@ -1996,7 +1996,7 @@ func devCmd(args []string) {
 	fs.StringVar(&recipesRoot, "recipes", "", "recipe modules root directory")
 	fs.StringVar(&formsRoot, "forms", "", "form modules root directory")
 	fs.StringVar(&modeRaw, "mode", string(modeDev), "runtime mode: dev or prod")
-	fs.BoolVar(&opts.includeSource, "include-source", false, "serve /view-source plus recipe source files from --recipes")
+	fs.BoolVar(&opts.viewSource, "view-source", false, "serve /view-source plus recipe source files from --recipes")
 	fs.IntVar(&port, "p", 4000, "port")
 	if err := fs.Parse(normalizeDevArgs(args)); err != nil {
 		gameOver("%s %v", usageDev, err)
@@ -2035,8 +2035,8 @@ func devCmd(args []string) {
 			gameOver("Invalid recipes directory: %q is not a directory", recipesRoot)
 		}
 	}
-	if opts.includeSource && recipesRoot == "" {
-		gameOver("--include-source requires --recipes <recipes_dir>")
+	if opts.viewSource && recipesRoot == "" {
+		gameOver("--view-source requires --recipes <recipes_dir>")
 	}
 
 	if formsRoot != "" {
@@ -2725,7 +2725,7 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 	recipeSourceAssets := make([]qinternal.RecipeSourceAsset, 0)
 	recipeSourceByPath := make(map[string]qinternal.RecipeSourceAsset)
 	recipeSourceIndex := []byte(nil)
-	if opts.includeSource && recipesRoot != "" {
+	if opts.viewSource && recipesRoot != "" {
 		recipeSourceAssets, err = qinternal.CollectRecipeSourceAssets(recipesRoot)
 		if err != nil {
 			closePipelines(ctx, recipeChains)
