@@ -3635,7 +3635,8 @@ func buildPipelineFromSpecs(ctx context.Context, specs []moduleSpec, opts option
 			driver := &wasmRunDriver{
 				runtime:                      runtime,
 				compiled:                     info.cm,
-				name:                         fmt.Sprintf("stage-%d", i),
+				instanceName:                 fmt.Sprintf("stage-%d", i),
+				modulePath:                   info.path,
 				opts:                         opts,
 				uniforms:                     info.uniforms,
 				allowMissingInputContentType: opts.trustFirstStageContent && i == 0,
@@ -3647,10 +3648,11 @@ func buildPipelineFromSpecs(ctx context.Context, specs []moduleSpec, opts option
 			var tileDrivers []qinternal.TileModuleDriver
 			for i < len(infos) && infos[i].kind == stageKindTile {
 				driver := &wasmTileModuleDriver{
-					runtime:  runtime,
-					compiled: infos[i].cm,
-					name:     fmt.Sprintf("tile-%d", i),
-					uniforms: infos[i].uniforms,
+					runtime:      runtime,
+					compiled:     infos[i].cm,
+					instanceName: fmt.Sprintf("tile-%d", i),
+					modulePath:   infos[i].path,
+					uniforms:     infos[i].uniforms,
 				}
 				// Pre-instantiate to get halo
 				if err := driver.init(ctx); err != nil {
@@ -3675,7 +3677,8 @@ func buildPipelineFromSpecs(ctx context.Context, specs []moduleSpec, opts option
 type wasmRunDriver struct {
 	runtime                      wazero.Runtime
 	compiled                     wazero.CompiledModule
-	name                         string
+	instanceName                 string
+	modulePath                   string
 	opts                         options
 	uniforms                     map[string]string
 	allowMissingInputContentType bool
@@ -3698,13 +3701,13 @@ func (d *wasmRunDriver) Execute(ctx context.Context, input qinternal.Content, re
 		d.compiled,
 		inputBytes,
 		d.opts,
-		d.name,
+		d.instanceName,
 		d.uniforms,
 		qinternal.ContentTypeOf(input),
 		d.allowMissingInputContentType,
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", d.modulePath, err)
 	}
 
 	switch exec.output.encoding {
@@ -3726,10 +3729,11 @@ func (d *wasmRunDriver) Close(ctx context.Context) error {
 }
 
 type wasmTileModuleDriver struct {
-	runtime  wazero.Runtime
-	compiled wazero.CompiledModule
-	name     string
-	uniforms map[string]string
+	runtime      wazero.Runtime
+	compiled     wazero.CompiledModule
+	instanceName string
+	modulePath   string
+	uniforms     map[string]string
 
 	mod         api.Module
 	tileFunc    api.Function
@@ -3740,21 +3744,21 @@ type wasmTileModuleDriver struct {
 }
 
 func (d *wasmTileModuleDriver) init(ctx context.Context) error {
-	mod, err := d.runtime.InstantiateModule(ctx, d.compiled, wazero.NewModuleConfig().WithName(d.name))
+	mod, err := d.runtime.InstantiateModule(ctx, d.compiled, wazero.NewModuleConfig().WithName(d.instanceName))
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %w", d.modulePath, err)
 	}
 	d.mod = mod
 
 	stage, err := loadTileStage(ctx, mod)
 	if err != nil {
 		mod.Close(ctx)
-		return err
+		return fmt.Errorf("%s: %w", d.modulePath, err)
 	}
 
 	if err := applyModuleUniforms(ctx, mod, d.uniforms); err != nil {
 		mod.Close(ctx)
-		return err
+		return fmt.Errorf("%s: %w", d.modulePath, err)
 	}
 
 	d.tileFunc = stage.tileFunc
@@ -3765,7 +3769,7 @@ func (d *wasmTileModuleDriver) init(ctx context.Context) error {
 		values, err := stage.haloFunc.Call(ctx)
 		if err != nil {
 			mod.Close(ctx)
-			return wasmruntime.HumanizeExecutionError(ctx, err)
+			return fmt.Errorf("%s: %w", d.modulePath, wasmruntime.HumanizeExecutionError(ctx, err))
 		}
 		if len(values) > 0 {
 			d.haloPx = int(int32(values[0]))
@@ -3781,21 +3785,21 @@ func (d *wasmTileModuleDriver) ExecuteTile(ctx context.Context, x, y float32, ti
 	// Convert float32 pixels to bytes for Wasm
 	pixelBytes := unsafe.Slice((*byte)(unsafe.Pointer(&tilePixels[0])), len(tilePixels)*4)
 	if uint64(len(pixelBytes)) > d.inputCap {
-		return nil, errors.New("tile too large for Wasm module capacity")
+		return nil, fmt.Errorf("%s: %w", d.modulePath, errors.New("tile too large for Wasm module capacity"))
 	}
 
 	mem := d.mod.Memory()
 	if !mem.Write(d.inputPtr, pixelBytes) {
-		return nil, errors.New("failed to write tile to Wasm memory")
+		return nil, fmt.Errorf("%s: %w", d.modulePath, errors.New("failed to write tile to Wasm memory"))
 	}
 
 	if _, err := d.tileFunc.Call(ctx, api.EncodeF32(x), api.EncodeF32(y)); err != nil {
-		return nil, wasmruntime.HumanizeExecutionError(ctx, err)
+		return nil, fmt.Errorf("%s: %w", d.modulePath, wasmruntime.HumanizeExecutionError(ctx, err))
 	}
 
 	outBytes, ok := mem.Read(d.inputPtr, uint32(len(pixelBytes)))
 	if !ok {
-		return nil, errors.New("failed to read tile from Wasm memory")
+		return nil, fmt.Errorf("%s: %w", d.modulePath, errors.New("failed to read tile from Wasm memory"))
 	}
 
 	// Copy back to float32 slice
@@ -3824,7 +3828,7 @@ func (d *wasmTileModuleDriver) SetImageSize(ctx context.Context, width, height i
 		api.EncodeF32(float32(width)),
 		api.EncodeF32(float32(height)),
 	); err != nil {
-		return wasmruntime.HumanizeExecutionError(ctx, err)
+		return fmt.Errorf("%s: %w", d.modulePath, wasmruntime.HumanizeExecutionError(ctx, err))
 	}
 	return nil
 }

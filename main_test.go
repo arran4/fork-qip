@@ -398,6 +398,35 @@ func TestRunDelayedStdinDoesNotFailExportResolution(t *testing.T) {
 	}
 }
 
+func TestRunModuleExecutionErrorIncludesModulePath(t *testing.T) {
+	cmd := exec.Command(
+		os.Args[0],
+		"-test.run=TestHelperRunModuleCLI",
+		"--",
+		"--timeout-ms",
+		"1",
+		"examples/infinite-loop.wasm",
+	)
+	cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("expected run to fail, stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	gotErr := stderr.String()
+	if !strings.Contains(gotErr, "examples/infinite-loop.wasm:") {
+		t.Fatalf("stderr=%q, want module path prefix", gotErr)
+	}
+	if !strings.Contains(gotErr, "Wasm module exceeded the execution time limit") {
+		t.Fatalf("stderr=%q, want execution timeout message", gotErr)
+	}
+}
+
 func TestRunAppliesUniformQueries(t *testing.T) {
 	inputPath := filepath.Join(t.TempDir(), "in.txt")
 	if err := os.WriteFile(inputPath, []byte("line1\nline2\nline3"), 0o644); err != nil {
