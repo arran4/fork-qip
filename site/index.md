@@ -39,12 +39,49 @@ modules/bytes/bmp-to-ico.wasm \
         <source src="/modules/image/svg+xml/svg-recolor-current-color.wasm" type="application/wasm" data-uniform-color_rgba="0xff7722ff" />
         <source src="/modules/image/svg+xml/svg-rasterize.wasm" type="application/wasm" />
         <source src="/modules/bytes/bmp-to-ico.wasm" type="application/wasm" />
-        <textarea name="input"></textarea>
+        <textarea name="input" rows="20" cols="40">&lt;svg
+  class=&quot;lucide lucide-cog&quot;
+  xmlns=&quot;http://www.w3.org/2000/svg&quot;
+  width=&quot;24&quot;
+  height=&quot;24&quot;
+  viewBox=&quot;0 0 24 24&quot;
+  fill=&quot;none&quot;
+  stroke=&quot;currentColor&quot;
+  stroke-width=&quot;2&quot;
+  stroke-linecap=&quot;round&quot;
+  stroke-linejoin=&quot;round&quot;
+&gt;
+  &lt;path d=&quot;M11 10.27 7 3.34&quot; /&gt;
+  &lt;path d=&quot;m11 13.73-4 6.93&quot; /&gt;
+  &lt;path d=&quot;M12 22v-2&quot; /&gt;
+  &lt;path d=&quot;M12 2v2&quot; /&gt;
+  &lt;path d=&quot;M14 12h8&quot; /&gt;
+  &lt;path d=&quot;m17 20.66-1-1.73&quot; /&gt;
+  &lt;path d=&quot;m17 3.34-1 1.73&quot; /&gt;
+  &lt;path d=&quot;M2 12h2&quot; /&gt;
+  &lt;path d=&quot;m20.66 17-1.73-1&quot; /&gt;
+  &lt;path d=&quot;m20.66 7-1.73 1&quot; /&gt;
+  &lt;path d=&quot;m3.34 17 1.73-1&quot; /&gt;
+  &lt;path d=&quot;m3.34 7 1.73 1&quot; /&gt;
+  &lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;2&quot; /&gt;
+  &lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;8&quot; /&gt;
+&lt;/svg&gt;</textarea>
         <output name="output"></output>
     </qip-preview>
 </form>
 
 ## Markdown
+
+<form>
+    <qip-preview>
+        <source src="/modules/text/markdown/commonmark.0.31.2.wasm" type="application/wasm" />
+        <textarea name="input" rows="10" cols="40"># Write some *Markdown*
+&#10;Here’s a [link](https&colon;//example.com)
+</textarea>
+<output name="output"></output>
+</qip-preview>
+
+</form>
 
 How to replicate a full CommonMark implementation workflow with `qip`:
 

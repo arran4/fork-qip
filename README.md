@@ -124,6 +124,9 @@ qip dev ./docs --recipes ./recipes --forms ./modules/form -p 4000
 # Serve browser-loadable wasm modules under /modules/*
 qip dev ./docs --recipes ./recipes --modules ./modules -p 4000
 
+# Pages containing <qip-preview> automatically get a client runtime that executes
+# <source type="application/wasm"> modules in order and renders into [name="output"].
+
 # Serve static assets with no recipe transforms
 qip dev ./public -p 4001
 

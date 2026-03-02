@@ -44,7 +44,8 @@ export fn output_content_type_size() u32 {
     return @as(u32, @intCast(CONTENT_TYPE.len));
 }
 
-// Uniform accepts packed RGBA as 0xRRGGBBAA (decimal value in query args).
+// Uniform accepts packed RGBA as 0xRRGGBBAA.
+// Use i64 to support the full unsigned 32-bit range (0..4294967295).
 export fn uniform_set_color_rgba(value: i64) i64 {
     if (value < 0) {
         color_rgba = 0;
@@ -274,4 +275,3 @@ test "formats packed rgba as css hex" {
     try std.testing.expectEqual(@as(usize, 9), alpha_len);
     try std.testing.expectEqualStrings("#11223344", buf[0..alpha_len]);
 }
-

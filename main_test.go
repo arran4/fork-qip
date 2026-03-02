@@ -1155,3 +1155,27 @@ func TestInjectQIPFormRuntimeMissingModule(t *testing.T) {
 		t.Fatal("expected error for missing form module")
 	}
 }
+
+func TestInjectQIPPreviewRuntime(t *testing.T) {
+	htmlBody := []byte(`<html><body><h1>Page</h1><qip-preview><source src="/modules/utf8/hello.wasm" type="application/wasm"></source><textarea name="input"></textarea><output name="output"></output></qip-preview></body></html>`)
+	out := injectQIPPreviewRuntime(htmlBody)
+	if !bytes.Contains(out, []byte(`<script type="module">`)) {
+		t.Fatalf("expected inline module script injection")
+	}
+	if !bytes.Contains(out, []byte(`customElements.define("qip-preview"`)) {
+		t.Fatalf("expected qip-preview custom element runtime")
+	}
+	scriptIdx := strings.Index(string(out), `<script type="module">`)
+	bodyCloseIdx := strings.Index(strings.ToLower(string(out)), `</body>`)
+	if scriptIdx == -1 || bodyCloseIdx == -1 || scriptIdx > bodyCloseIdx {
+		t.Fatalf("expected script to be injected before </body>")
+	}
+}
+
+func TestInjectQIPPreviewRuntimeNoTag(t *testing.T) {
+	htmlBody := []byte(`<html><body><h1>Page</h1><p>No preview.</p></body></html>`)
+	out := injectQIPPreviewRuntime(htmlBody)
+	if !bytes.Equal(out, htmlBody) {
+		t.Fatalf("expected html body to remain unchanged when no qip-preview tags are present")
+	}
+}
