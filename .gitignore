@@ -36,3 +36,5 @@ tmp/
 __pycache__
 
 qip
+site-static.tar
+site-static/
