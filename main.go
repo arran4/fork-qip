@@ -104,7 +104,7 @@ const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a ch
 const usageRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file> [?key=value ...] ..."
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value ...] ..."
-const usageComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
+const usageComply = "Usage: qip comply <impl.wasm> [--with <compliance.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
 const usageDev = "Usage: qip dev <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [--view-source] [-p <port>] [-v|--verbose]"
 const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  get      Resolve one GET path through the dev router and print the result\n  head     Resolve one HEAD path through the dev router and print headers\n  list     List routed paths and content types\n  warc     Archive the routed site and write a minimal WARC file"
 const usageRouteGet = "Usage: qip route get <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--mode <dev|prod>] [-v|--verbose]"
@@ -118,7 +118,80 @@ var qipFormTagPattern = regexp.MustCompile(`(?is)<qip-form\b[^>]*>`)
 var qipFormNamePattern = regexp.MustCompile("(?is)\\bname\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))")
 
 const helpRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file> [?key=value ...] ...\n\nModule contracts:\n  Run mode:\n    - Exports run(input_size), input_ptr, and input_utf8_cap or input_bytes_cap\n    - Exports output_ptr and output_utf8_cap or output_bytes_cap or output_i32_cap\n    - Optional uniforms: uniform_set_<key>(value)\n  Image mode:\n    - Exports tile_rgba_f32_64x64, input_ptr, input_bytes_cap\n    - Optional: uniform_set_width_and_height, calculate_halo_px\n\nUniform args:\n  Place ?key=value after a module path to set that module's uniforms.\n  Example: examples/text-to-bmp.wasm ?leading=24\n\nComposition:\n  If a module exports tile_rgba_f32_64x64, qip run composes a contiguous image stage block.\n  Input to that block must be BMP bytes and the block outputs BMP bytes.\n  Run stages may follow and will receive BMP bytes.\n\nExample:\n  echo '<svg width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#d52b1e\" /><rect x=\"13\" y=\"6\" width=\"6\" height=\"20\" fill=\"#ffffff\" /><rect x=\"6\" y=\"13\" width=\"20\" height=\"6\" fill=\"#ffffff\" /></svg>' | ./qip run examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > out.ico"
-const helpComply = "Usage: qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]\n\nBase validation (always run):\n  - Requires export memory\n  - Detects module kind: run, tile, or run+tile\n\n--with check modules:\n  - qip instantiates the implementation as module name \"impl\"\n  - each check module must import impl.memory\n  - each check module must export positive() -> i32\n  - optional: export negative() -> i32\n  - qip runs positive() first\n  - if negative() exists, qip runs it on a fresh impl instance and also provides host import qip.run_must_trap(i32) -> i32\n  - status > 0 passes, status <= 0 fails\n  - checks run in parallel; all must pass\n\nWAT shape (minimal):\n  (import \"impl\" \"memory\" (memory 1))\n  (import \"impl\" \"run\" (func $run (param i32) (result i32)))\n  (func (export \"positive\") (result i32)\n    i32.const 1)\n\nFailure behavior:\n  - if impl traps during positive(), that check fails immediately\n  - for negative(), call qip.run_must_trap(...) when trap is the expected outcome\n  - qip reports failing check path and any optional failure detail exports"
+const helpComply = `Usage: qip comply <impl.wasm> [--with <compliance.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]
+
+What qip comply does:
+  1) Base ABI validation on impl.wasm (always):
+     - impl must export memory
+     - detects module kind: run, tile, or run+tile
+     - run kind requires:
+         run(i32) -> i32
+         input_ptr (global i32 or function () -> i32)
+         input_utf8_cap or input_bytes_cap (global i32 or function () -> i32)
+     - tile kind requires:
+         tile_rgba_f32_64x64(f32, f32) -> ()
+         input_ptr (global i32 or function () -> i32)
+         input_bytes_cap (global i32 or function () -> i32)
+
+  2) Executes each --with compliance module:
+     - qip instantiates impl as module name "impl"
+     - all compliance modules run in parallel
+     - all must pass
+
+Compliance module contract (what to implement):
+  Required imports/exports:
+    - must import impl.memory
+    - must export positive() -> i32
+  Optional:
+    - export negative() -> i32
+    - import qip.run_must_trap(i32) -> i32 for negative tests that expect trap
+
+Status convention:
+  - return > 0 to pass
+  - return <= 0 to fail
+  - positive() trap always fails
+  - if negative() exists, it runs on a fresh impl instance
+  - negative() returning <= 0 fails (use run_must_trap when trap is expected)
+
+Memory model for compliance modules:
+  - compliance imports impl.memory, so both modules see the same linear memory
+  - to test a run module, compliance usually:
+      - calls impl.input_ptr() and impl.input_utf8_cap()/input_bytes_cap()
+      - writes test input bytes into impl.memory at input_ptr
+      - calls impl.run(input_size)
+      - reads output from impl.output_ptr() and returned output size
+
+Failure detail exports (optional but recommended):
+  Export pointer/size pairs so qip can print reproducible context:
+    - failure_message_ptr / failure_message_size
+    - failure_input_ptr / failure_input_size
+    - failure_expected_output_ptr / failure_expected_output_size
+    - failure_actual_output_ptr / failure_actual_output_size
+  Legacy output fallback also supported:
+    - failure_output_ptr / failure_output_size
+  Aliases with fail_* prefix are also accepted.
+
+Minimal WAT template (run module checker):
+  (module
+    (import "impl" "memory" (memory 1))
+    (import "impl" "input_ptr" (func $input_ptr (result i32)))
+    (import "impl" "run" (func $run (param i32) (result i32)))
+    (import "impl" "output_ptr" (func $output_ptr (result i32)))
+
+    (func (export "positive") (result i32)
+      ;; write input at (call $input_ptr), call $run, compare output, return >0 on pass
+      i32.const 1)
+
+    ;; optional negative phase:
+    ;; (import "qip" "run_must_trap" (func $run_must_trap (param i32) (result i32)))
+    ;; (func (export "negative") (result i32) ...)
+  )
+
+Authoring workflow for agents:
+  1) Build impl wasm.
+  2) Run: qip comply impl.wasm --with compliance.wasm
+  3) On failure, inspect printed message/input/expected/actual previews.
+  4) Update impl or compliance module and repeat until PASS.`
 
 func main() {
 	args := os.Args[1:]

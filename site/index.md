@@ -46,11 +46,29 @@ examples/bmp-to-ico.wasm \
 
 ## Markdown
 
-TODO: add Markdown example. Show using `qip comply` to validate against CommonMark.
+How to replicate a full CommonMark implementation workflow with `qip`:
+
+1. Download the CommonMark spec source text (pin a version for reproducibility).
+2. Ask a coding agent (for example, Codex or Claude Code) to generate a compliance module wasm from the spec using `qip comply`.
+3. Ask a coding agent to implement a new markdown wasm from scratch (for example `examples/commonmark.0.31.2.zig`) and iterate until compliance passes.
 
 ```bash
-wget https://raw.githubusercontent.com/commonmark/commonmark-spec/refs/heads/master/spec.txt
+# 1) Download spec text (pin the tag/version you want)
+curl -L https://raw.githubusercontent.com/commonmark/commonmark-spec/0.31.2/spec.txt \
+  -o compliance/commonmark-spec-0.31.2.txt
+
+# 2) Build your markdown implementation wasm (example path)
+make -B -j examples/commonmark.0.31.2.wasm
+
+# 3) Run compliance and keep iterating until PASS
+./qip comply examples/commonmark.0.31.2.wasm \
+  --with compliance/commonmark-spec-0.31.2.wasm
 ```
+
+Agent prompt pattern that works well:
+
+- “Create `compliance/commonmark-spec-0.31.2.wasm` from `spec.txt` using qip comply conventions.”
+- “Now implement `examples/commonmark.0.31.2.wasm` from scratch and keep running `qip comply ... --with compliance/commonmark-spec-0.31.2.wasm` until it passes.”
 
 ## Websites
 
