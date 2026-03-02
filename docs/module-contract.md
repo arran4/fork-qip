@@ -33,6 +33,64 @@ Required function:
 
 If `output_ptr` + output cap are not exported, `qip` falls back to printing `Ran: <run_return_value>`.
 
+### Optional Uniforms (`uniform_set_<key>`)
+
+Modules may export uniform setter functions and callers can pass values via query args.
+
+Uniform export contract:
+
+- Name must be `uniform_set_<key>` where `<key>` matches the query key.
+- Setter must accept exactly one parameter.
+- Supported parameter types are: `i32`, `i64`, `f32`, `f64`.
+- Setter return value is ignored by `qip` (you can still return the clamped/applied value).
+- Exception: image modules may also export `uniform_set_width_and_height(f32, f32)`; this is host-managed and not set via query args.
+
+Host behavior:
+
+- Uniforms are applied after module instantiation and before `run(...)` (or before tile execution in image mode).
+- If a query key is provided but the module does not export `uniform_set_<key>`, execution fails.
+- If parsing fails for the expected numeric type, execution fails.
+- Integer uniforms (`i32`, `i64`) parse decimal by default; hexadecimal is accepted only when prefixed with `0x` (or `0X`).
+- Uniform keys are applied in sorted key order; do not rely on setter call order for dependent state changes.
+
+CLI syntax:
+
+- Put uniform query args immediately after the module path.
+- `qip run ... module.wasm '?key=value'`
+- `qip image ... module.wasm '?key=value&other=1.5'`
+- Multiple query args may follow the same module path and are merged.
+
+Examples:
+
+```sh
+# i32 uniform
+qip run examples/text-to-bmp.wasm '?cols=120'
+
+# f32 uniforms
+qip image -i in.jpg -o out.png examples/rgba/color-halftone.wasm '?max_radius=2.0&angle_c=0.26'
+
+# i64 uniform for packed 32-bit RGBA passed as hexadecimal (0xRRGGBBAA)
+qip run examples/svg-recolor-current-color.wasm '?color_rgba=0xff5511ff'
+```
+
+Zig example:
+
+```zig
+var color_rgba: u32 = 0x000000FF;
+
+// Use i64 if you need full 0..4294967295 range from query parsing.
+export fn uniform_set_color_rgba(v: i64) i64 {
+    if (v < 0) {
+        color_rgba = 0;
+    } else if (v > 0xFFFF_FFFF) {
+        color_rgba = 0xFFFF_FFFF;
+    } else {
+        color_rgba = @as(u32, @intCast(v));
+    }
+    return @as(i64, @intCast(color_rgba));
+}
+```
+
 ## WebAssembly Module Contract
 
 ### `input_utf8_cap` / `input_bytes_cap`

@@ -239,6 +239,56 @@ func TestParseModuleSpecs(t *testing.T) {
 	})
 }
 
+func TestParseUniformInt(t *testing.T) {
+	t.Run("parses decimal values", func(t *testing.T) {
+		got, err := parseUniformInt("123", 64)
+		if err != nil {
+			t.Fatalf("parseUniformInt error: %v", err)
+		}
+		if got != 123 {
+			t.Fatalf("got %d, want 123", got)
+		}
+	})
+
+	t.Run("parses hex with 0x prefix", func(t *testing.T) {
+		got, err := parseUniformInt("0xff4511ff", 64)
+		if err != nil {
+			t.Fatalf("parseUniformInt error: %v", err)
+		}
+		if got != 4282716671 {
+			t.Fatalf("got %d, want 4282716671", got)
+		}
+	})
+
+	t.Run("parses signed hex with 0x prefix", func(t *testing.T) {
+		got, err := parseUniformInt("-0x7f", 64)
+		if err != nil {
+			t.Fatalf("parseUniformInt error: %v", err)
+		}
+		if got != -127 {
+			t.Fatalf("got %d, want -127", got)
+		}
+	})
+
+	t.Run("rejects missing hex prefix", func(t *testing.T) {
+		if _, err := parseUniformInt("ff4511ff", 64); err == nil {
+			t.Fatal("expected parse error")
+		}
+	})
+
+	t.Run("rejects invalid hex after prefix", func(t *testing.T) {
+		if _, err := parseUniformInt("0xgg", 64); err == nil {
+			t.Fatal("expected parse error")
+		}
+	})
+
+	t.Run("rejects i32 overflow", func(t *testing.T) {
+		if _, err := parseUniformInt("0xffffffff", 32); err == nil {
+			t.Fatal("expected parse error")
+		}
+	})
+}
+
 func TestBuildRouteListEntries(t *testing.T) {
 	state := &devRuntimeState{
 		contentRoutes: map[string]qinternal.ContentRoute{

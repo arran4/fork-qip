@@ -1316,6 +1316,21 @@ func runTileStagesCompiled(ctx context.Context, runtime wazero.Runtime, compiled
 	return outputRGBA, instDurations, stageDurations, nil
 }
 
+func parseUniformInt(value string, bitSize int) (int64, error) {
+	base := 10
+	raw := value
+
+	if len(value) >= 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X') {
+		base = 16
+		raw = value[2:]
+	} else if len(value) >= 3 && (value[0] == '+' || value[0] == '-') && value[1] == '0' && (value[2] == 'x' || value[2] == 'X') {
+		base = 16
+		raw = value[:1] + value[3:]
+	}
+
+	return strconv.ParseInt(raw, base, bitSize)
+}
+
 func applyModuleUniforms(ctx context.Context, mod api.Module, uniforms map[string]string) error {
 	if len(uniforms) == 0 {
 		return nil
@@ -1358,13 +1373,13 @@ func applyModuleUniforms(ctx context.Context, mod api.Module, uniforms map[strin
 			}
 			args[0] = api.EncodeF64(parsed)
 		case api.ValueTypeI32:
-			parsed, err := strconv.ParseInt(value, 10, 32)
+			parsed, err := parseUniformInt(value, 32)
 			if err != nil {
 				return fmt.Errorf("invalid value %q for %s (expected i32)", value, fnName)
 			}
 			args[0] = uint64(uint32(int32(parsed)))
 		case api.ValueTypeI64:
-			parsed, err := strconv.ParseInt(value, 10, 64)
+			parsed, err := parseUniformInt(value, 64)
 			if err != nil {
 				return fmt.Errorf("invalid value %q for %s (expected i64)", value, fnName)
 			}
