@@ -366,6 +366,30 @@ func TestBuildRouteListEntriesUsesRecipeOutputContentType(t *testing.T) {
 	}
 }
 
+func TestBuildRouteListEntriesIncludesModuleAssets(t *testing.T) {
+	state := &devRuntimeState{
+		contentRoutes: map[string]qinternal.ContentRoute{
+			"/guide": {FilePath: "docs/guide.md", SourceMIME: "text/markdown"},
+		},
+		routeOptions: qinternal.DefaultRouteOptions(),
+		moduleAssets: map[string]moduleAsset{
+			"/modules/bytes/base64-encode.wasm": {contentType: "application/wasm"},
+		},
+		moduleRequestPaths: []string{"/modules/bytes/base64-encode.wasm"},
+	}
+
+	got := buildRouteListEntries(state)
+	want := []routeListEntry{
+		{Method: "GET", Path: "/guide", ContentType: "text/markdown"},
+		{Method: "HEAD", Path: "/guide", ContentType: "text/markdown"},
+		{Method: "GET", Path: "/modules/bytes/base64-encode.wasm", ContentType: "application/wasm"},
+		{Method: "HEAD", Path: "/modules/bytes/base64-encode.wasm", ContentType: "application/wasm"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("entries=%v, want %v", got, want)
+	}
+}
+
 func TestResolveRecipeSourceResponse(t *testing.T) {
 	state := &devRuntimeState{
 		recipeSourceAssets: []qinternal.RecipeSourceAsset{
@@ -995,6 +1019,86 @@ func TestLoadFormModulesSupportsSymlinkedWasmAndIgnoresNonWasmSymlink(t *testing
 		t.Fatalf("digest count=%d, want 1", len(digests))
 	}
 	if !bytes.Equal(modules["contact"], wasmBytes) {
+		t.Fatalf("contact module bytes mismatch")
+	}
+}
+
+func TestLoadModuleAssets(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	wasmBytes, err := os.ReadFile(filepath.Join("examples", "hello.wasm"))
+	if err != nil {
+		t.Fatalf("read wasm fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "contact.wasm"), wasmBytes, 0o644); err != nil {
+		t.Fatalf("write contact wasm: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "nested", "signup.wasm"), wasmBytes, 0o644); err != nil {
+		t.Fatalf("write nested wasm: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.txt"), []byte("ignore"), 0o644); err != nil {
+		t.Fatalf("write non-wasm: %v", err)
+	}
+
+	assets, requestPaths, err := loadModuleAssets(root)
+	if err != nil {
+		t.Fatalf("loadModuleAssets error: %v", err)
+	}
+	if len(assets) != 2 {
+		t.Fatalf("asset count=%d, want 2", len(assets))
+	}
+	if len(requestPaths) != 2 {
+		t.Fatalf("request path count=%d, want 2", len(requestPaths))
+	}
+	if !bytes.Equal(assets["/modules/contact.wasm"].body, wasmBytes) {
+		t.Fatalf("contact module bytes mismatch")
+	}
+	if got := assets["/modules/contact.wasm"].contentType; got != "application/wasm" {
+		t.Fatalf("content type=%q, want application/wasm", got)
+	}
+	if !bytes.Equal(assets["/modules/nested/signup.wasm"].body, wasmBytes) {
+		t.Fatalf("nested/signup module bytes mismatch")
+	}
+}
+
+func TestLoadModuleAssetsSupportsSymlinkedWasmAndIgnoresNonWasmSymlink(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+
+	wasmBytes, err := os.ReadFile(filepath.Join("examples", "hello.wasm"))
+	if err != nil {
+		t.Fatalf("read wasm fixture: %v", err)
+	}
+	externalWasm := filepath.Join(external, "contact.wasm")
+	if err := os.WriteFile(externalWasm, wasmBytes, 0o644); err != nil {
+		t.Fatalf("write external wasm: %v", err)
+	}
+	externalText := filepath.Join(external, "commonmark-spec-0.31.2.txt")
+	if err := os.WriteFile(externalText, []byte("spec"), 0o644); err != nil {
+		t.Fatalf("write external text: %v", err)
+	}
+
+	if err := os.Symlink(externalWasm, filepath.Join(root, "contact.wasm")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := os.Symlink(externalText, filepath.Join(root, "commonmark-spec-0.31.2.txt")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	assets, requestPaths, err := loadModuleAssets(root)
+	if err != nil {
+		t.Fatalf("loadModuleAssets error: %v", err)
+	}
+	if len(assets) != 1 {
+		t.Fatalf("asset count=%d, want 1", len(assets))
+	}
+	if len(requestPaths) != 1 {
+		t.Fatalf("request path count=%d, want 1", len(requestPaths))
+	}
+	if !bytes.Equal(assets["/modules/contact.wasm"].body, wasmBytes) {
 		t.Fatalf("contact module bytes mismatch")
 	}
 }

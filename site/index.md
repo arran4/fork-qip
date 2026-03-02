@@ -28,17 +28,17 @@ TODO: add image processing pipeline.
 
 ```bash
 curl https://unpkg.com/lucide-static@0.575.0/icons/cog.svg \
-| qip run examples/svg-recolor-current-color.wasm '?color_rgba=0xff7722ff' \
-examples/svg-rasterize.wasm \
-examples/bmp-to-ico.wasm \
+| qip run modules/image/svg+xml/svg-recolor-current-color.wasm '?color_rgba=0xff7722ff' \
+modules/image/svg+xml/svg-rasterize.wasm \
+modules/bytes/bmp-to-ico.wasm \
 > cog.ico
 ```
 
 <form>
     <qip-preview>
-        <source src="/view-source/dynamic/svg-recolor-current-color.wasm" type="application/wasm" data-uniform-color_rgba="0xff7722ff" />
-        <source src="/view-source/dynamic/svg-rasterize.wasm" type="application/wasm" />
-        <source src="/view-source/dynamic/bmp-to-ico.wasm" type="application/wasm" />
+        <source src="/modules/image/svg+xml/svg-recolor-current-color.wasm" type="application/wasm" data-uniform-color_rgba="0xff7722ff" />
+        <source src="/modules/image/svg+xml/svg-rasterize.wasm" type="application/wasm" />
+        <source src="/modules/bytes/bmp-to-ico.wasm" type="application/wasm" />
         <textarea name="input"></textarea>
         <output name="output"></output>
     </qip-preview>
@@ -50,7 +50,7 @@ How to replicate a full CommonMark implementation workflow with `qip`:
 
 1. Download the CommonMark spec source text (pin a version for reproducibility).
 2. Ask a coding agent (for example, Codex or Claude Code) to generate a compliance module wasm from the spec using `qip comply`.
-3. Ask a coding agent to implement a new markdown wasm from scratch (for example `examples/commonmark.0.31.2.zig`) and iterate until compliance passes.
+3. Ask a coding agent to implement a new markdown wasm from scratch (for example `modules/text/markdown/commonmark.0.31.2.zig`) and iterate until compliance passes.
 
 ```bash
 # 1) Download spec text (pin the tag/version you want)
@@ -58,17 +58,17 @@ curl -L https://raw.githubusercontent.com/commonmark/commonmark-spec/0.31.2/spec
   -o compliance/commonmark-spec-0.31.2.txt
 
 # 2) Build your markdown implementation wasm (example path)
-make -B -j examples/commonmark.0.31.2.wasm
+make -B -j modules/text/markdown/commonmark.0.31.2.wasm
 
 # 3) Run compliance and keep iterating until PASS
-./qip comply examples/commonmark.0.31.2.wasm \
+./qip comply modules/text/markdown/commonmark.0.31.2.wasm \
   --with compliance/commonmark-spec-0.31.2.wasm
 ```
 
 Agent prompt pattern that works well:
 
 - “Create `compliance/commonmark-spec-0.31.2.wasm` from `spec.txt` using qip comply conventions.”
-- “Now implement `examples/commonmark.0.31.2.wasm` from scratch and keep running `qip comply ... --with compliance/commonmark-spec-0.31.2.wasm` until it passes.”
+- “Now implement `modules/text/markdown/commonmark.0.31.2.wasm` from scratch and keep running `qip comply ... --with compliance/commonmark-spec-0.31.2.wasm` until it passes.”
 
 ## Websites
 

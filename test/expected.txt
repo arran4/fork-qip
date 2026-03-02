@@ -179,6 +179,7 @@ pre {
 }
 pre {
   overflow: auto;
+  white-space: pre-wrap;
 }
 img {
   max-width: 100%;

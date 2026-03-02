@@ -15,11 +15,37 @@ import (
 )
 
 func TestNormalizeRouteWarcArgs(t *testing.T) {
-	in := []string{"docs/", "--recipes", "recipes/", "--host", "example.com", "-o", "out.warc"}
+	in := []string{"docs/", "--recipes", "recipes/", "--modules", "modules/", "--host", "example.com", "-o", "out.warc"}
 	got := normalizeRouteWarcArgs(in)
-	want := []string{"--recipes", "recipes/", "--host", "example.com", "-o", "out.warc", "docs/"}
+	want := []string{"--recipes", "recipes/", "--modules", "modules/", "--host", "example.com", "-o", "out.warc", "docs/"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%v, want %v", got, want)
+	}
+}
+
+func TestRunRouteWARCPassesModulesRoot(t *testing.T) {
+	var gotModulesRoot string
+	err := RunRoute([]string{"warc", "--modules", "modules", "docs"}, RouteConfig{
+		UsageRoute:     "usage route",
+		UsageRouteWarc: "usage route warc",
+		DefaultMode:    "dev",
+		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
+			gotModulesRoot = request.ModulesRoot
+			return []string{"/a"}, nil
+		},
+		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			return qinternal.InProcessHTTPResponse{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/plain"}},
+				Body:       []byte("ok"),
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunRoute: %v", err)
+	}
+	if gotModulesRoot != "modules" {
+		t.Fatalf("modules root=%q, want modules", gotModulesRoot)
 	}
 }
 

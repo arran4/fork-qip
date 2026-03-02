@@ -15,11 +15,11 @@ qip comply <impl.wasm> [--with <check.wasm> ...] [-v|--verbose] [--timeout-ms <m
 ## Examples In This Repo
 
 ```bash
-# Expects that the examples/e164.wasm module produces normalized phone numbers, and preserves empty input.
-qip comply examples/e164.wasm --with compliance/e164.comply.wasm --with compliance/preserve-empty.wasm
+# Expects that the modules/utf8/e164.wasm module produces normalized phone numbers, and preserves empty input.
+qip comply modules/utf8/e164.wasm --with compliance/e164.comply.wasm --with compliance/preserve-empty.wasm
 
-# Expects that the examples/utf8-must-be-valid.wasm module traps when provided a range of invalid UTF-8, and also accepts whitespace or empty strings untouched.
-qip comply examples/utf8-must-be-valid.wasm --with compliance/trap-invalid-utf8.wasm --with compliance/preserve-empty.wasm --with compliance/preserve-whitespace.wasm
+# Expects that the modules/utf8/utf8-must-be-valid.wasm module traps when provided a range of invalid UTF-8, and also accepts whitespace or empty strings untouched.
+qip comply modules/utf8/utf8-must-be-valid.wasm --with compliance/trap-invalid-utf8.wasm --with compliance/preserve-empty.wasm --with compliance/preserve-whitespace.wasm
 ```
 
 ## What It Does

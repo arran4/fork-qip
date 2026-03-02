@@ -20,7 +20,24 @@ Planned host integrations include Swift, React, and Elixir, making reusable logi
 go install github.com/royalicing/qip@latest
 ```
 
-You can clone this repo to use the modules that are provided in `./examples` .
+You can clone this repo to use the modules that are provided in `./modules`.
+For compatibility, `./examples` keeps symlinks to the same module files.
+
+Current module layout groups by content type (and by non-MIME domains where useful):
+
+```text
+modules/
+  utf8/
+  text/html/
+  text/markdown/
+  text/css/
+  text/javascript/
+  text/x-c/
+  image/svg+xml/
+  bytes/
+  rgba/
+  form/
+```
 
 ## Usage
 
@@ -28,36 +45,36 @@ You can pipe the results of other tools to stdin or pass files in via `-i`. You 
 
 ```bash
 # Normalize phone number
-echo "+1 (212) 555-0100" | qip run examples/e164.wasm
+echo "+1 (212) 555-0100" | qip run modules/utf8/e164.wasm
 # +12125550100
 
 # Convert WebAssembly purple from rgb to hex
-echo "rgb(101, 79, 240)" | qip run examples/rgb-to-hex.wasm
+echo "rgb(101, 79, 240)" | qip run modules/utf8/rgb-to-hex.wasm
 # #654ff0
 
 # Create zlib bytes (dynamic Huffman, shown as base64)
-echo "qip + wasm" | qip run examples/zlib-compress-dynamic-huffman.wasm examples/base64-encode.wasm
+echo "qip + wasm" | qip run modules/bytes/zlib-compress-dynamic-huffman.wasm modules/bytes/base64-encode.wasm
 # eAEFwKENAAAMArBX8LtqcmIJBMH7VEcMsv4CEnkDbg==
 
 # Round-trip zlib back to original text
-echo "qip + wasm" | qip run examples/zlib-compress-dynamic-huffman.wasm examples/zlib-decompress.wasm
+echo "qip + wasm" | qip run modules/bytes/zlib-compress-dynamic-huffman.wasm modules/bytes/zlib-decompress.wasm
 # qip + wasm
 
 # Expand emoji shortcodes
-echo "Run :rocket: WebAssembly pipelines identically on any computer :sparkles:" | qip run examples/shortcode-to-emoji.wasm
+echo "Run :rocket: WebAssembly pipelines identically on any computer :sparkles:" | qip run modules/utf8/shortcode-to-emoji.wasm
 # Run 🚀 WebAssembly pipelines identically on any computer ✨
 
 #  Load Hacker News, extractor all links with text
-curl -s https://news.ycombinator.com | qip run examples/html-link-extractor.wasm | grep "^https:"
+curl -s https://news.ycombinator.com | qip run modules/text/html/html-link-extractor.wasm | grep "^https:"
 
 # Render .svg to .ico
-qip run -i qip-logo.svg examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > qip-logo.ico
+qip run -i qip-logo.svg modules/image/svg+xml/svg-rasterize.wasm modules/bytes/bmp-double.wasm modules/bytes/bmp-to-ico.wasm > qip-logo.ico
 
 # Render Switzerland flag svg to .ico
-echo '<svg width="32" height="32"><rect width="32" height="32" fill="#d52b1e" /><rect x="13" y="6" width="6" height="20" fill="#ffffff" /><rect x="6" y="13" width="20" height="6" fill="#ffffff" /></svg>' | qip run examples/svg-rasterize.wasm examples/bmp-to-ico.wasm > switzerland-flag.ico
+echo '<svg width="32" height="32"><rect width="32" height="32" fill="#d52b1e" /><rect x="13" y="6" width="6" height="20" fill="#ffffff" /><rect x="6" y="13" width="20" height="6" fill="#ffffff" /></svg>' | qip run modules/image/svg+xml/svg-rasterize.wasm modules/bytes/bmp-to-ico.wasm > switzerland-flag.ico
 
 # Test execution timeout safeguards with a module that never returns
-echo "x" | qip run examples/infinite-loop.wasm
+echo "x" | qip run modules/utf8/infinite-loop.wasm
 # Wasm module exceeded the execution time limit (100ms)
 ```
 
@@ -81,15 +98,15 @@ Benchmark the performance of one or more modules. If you compare multiple module
 
 ```bash
 # Benchmark module for two seconds
-echo "World" | qip bench -i - --benchtime=2s examples/hello.wasm
+echo "World" | qip bench -i - --benchtime=2s modules/utf8/hello.wasm
 # bench: outputs match
 
 # Benchmark two modules against each other and verify identical output
-echo "World" | qip bench -i - --benchtime=2s examples/hello.wasm examples/hello-c.wasm
+echo "World" | qip bench -i - --benchtime=2s modules/utf8/hello.wasm modules/utf8/hello-c.wasm
 # bench: outputs match
 
 # Benchmark three modules against each other and verify identical output
-echo "World" | qip bench -i - --benchtime=2s examples/hello.wasm examples/hello-c.wasm examples/hello-zig.wasm
+echo "World" | qip bench -i - --benchtime=2s modules/utf8/hello.wasm modules/utf8/hello-c.wasm modules/utf8/hello-zig.wasm
 # bench: outputs match
 ```
 
@@ -101,13 +118,16 @@ echo "World" | qip bench -i - --benchtime=2s examples/hello.wasm examples/hello-
 qip dev ./docs --recipes ./recipes -p 4000
 
 # Enable client-side <qip-form> tags.
-# <qip-form name="contact"></qip-form> resolves to ./examples/contact.wasm.
-qip dev ./docs --recipes ./recipes --forms ./examples -p 4000
+# <qip-form name="form-email-message"></qip-form> resolves to ./modules/form/form-email-message.wasm.
+qip dev ./docs --recipes ./recipes --forms ./modules/form -p 4000
+
+# Serve browser-loadable wasm modules under /modules/*
+qip dev ./docs --recipes ./recipes --modules ./modules -p 4000
 
 # Serve static assets with no recipe transforms
 qip dev ./public -p 4001
 
-# Reload routes, recipes, and forms without stopping the server
+# Reload routes, recipes, forms, and modules without stopping the server
 kill -HUP <qip-dev-pid>
 ```
 
@@ -141,16 +161,16 @@ qip dev ./docs --recipes ./recipes -p 4000
 Resolve a single path through the same router pipeline:
 
 ```bash
-qip route get ./docs /about --recipes ./recipes
-qip route head ./docs /about --recipes ./recipes
-qip route list ./docs --recipes ./recipes
+qip route get ./docs /about --recipes ./recipes --modules ./modules
+qip route head ./docs /about --recipes ./recipes --modules ./modules
+qip route list ./docs --recipes ./recipes --modules ./modules
 ```
 
 Build static output from the routed site (no intermediate `.warc` file on disk):
 
 ```bash
-qip route warc ./docs --recipes ./recipes \
-  | qip run examples/warc-to-static-tar-no-trailing-slash.wasm \
+qip route warc ./docs --recipes ./recipes --modules ./modules \
+  | qip run modules/bytes/warc-to-static-tar-no-trailing-slash.wasm \
   > site.tar
 
 tar -tf site.tar
@@ -163,10 +183,10 @@ With the `warc-to-static-tar-no-trailing-slash` module, route paths like `/about
 You can process images through a chain of rgba shaders. It breaks the work into 64x64 tiles.
 
 ```bash
-qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/bw-invert-vignette.png examples/rgba/black-and-white.wasm examples/rgba/invert.wasm examples/rgba/vignette.wasm
+qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/bw-invert-vignette.png modules/rgba/black-and-white.wasm modules/rgba/invert.wasm modules/rgba/vignette.wasm
 
 # Per-module uniforms via query args (quote '?' in shells like zsh)
-qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png examples/rgba/color-halftone.wasm '?max_radius=2.0' examples/rgba/brightness.wasm '?brightness=0.2'
+qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png modules/rgba/color-halftone.wasm '?max_radius=2.0' modules/rgba/brightness.wasm '?brightness=0.2'
 ```
 
 ## TODO

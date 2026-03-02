@@ -24,6 +24,7 @@ type RouteWARCRequest struct {
 	RequestPath string
 	RecipesRoot string
 	FormsRoot   string
+	ModulesRoot string
 	ModeRaw     string
 	Host        string
 	Verbose     bool
@@ -73,6 +74,7 @@ func RunRoute(args []string, config RouteConfig) error {
 func runRouteWARC(args []string, config RouteConfig) error {
 	var recipesRoot string
 	var formsRoot string
+	var modulesRoot string
 	var modeRaw string
 	hostRaw := "qip.local"
 	outputPath := "-"
@@ -85,6 +87,7 @@ func runRouteWARC(args []string, config RouteConfig) error {
 	fs.BoolVar(&verbose, "verbose", false, "enable verbose logging")
 	fs.StringVar(&recipesRoot, "recipes", "", "recipe modules root directory")
 	fs.StringVar(&formsRoot, "forms", "", "form modules root directory")
+	fs.StringVar(&modulesRoot, "modules", "", "browser-loadable wasm modules root directory")
 	fs.StringVar(&modeRaw, "mode", config.DefaultMode, "runtime mode")
 	fs.StringVar(&hostRaw, "host", hostRaw, "WARC-Target-URI host")
 	fs.StringVar(&outputPath, "o", "-", "output WARC path ('-' for stdout)")
@@ -112,6 +115,7 @@ func runRouteWARC(args []string, config RouteConfig) error {
 		ContentRoot: contentRoot,
 		RecipesRoot: recipesRoot,
 		FormsRoot:   formsRoot,
+		ModulesRoot: modulesRoot,
 		ModeRaw:     modeRaw,
 		Host:        host,
 		Verbose:     verbose,
@@ -195,6 +199,7 @@ func normalizeRouteWarcArgs(args []string) []string {
 	flagsWithValue := map[string]struct{}{
 		"--recipes": {},
 		"--forms":   {},
+		"--modules": {},
 		"--mode":    {},
 		"--host":    {},
 		"-o":        {},

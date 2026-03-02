@@ -1,8 +1,8 @@
-.PHONY: compliance examples recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test test-go site-static install
+.PHONY: compliance examples modules recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test test-go site-static install
 
-default: qip compliance examples recipes
+default: qip compliance modules recipes
 
-include ./examples/sqlite3/sqlite.mk
+include ./fixtures/sqlite3/sqlite.mk
 
 WASM_STACK_SIZE ?= 65536
 WASM_STACK_FLAG := -Wl,-z,stack-size=$(WASM_STACK_SIZE)
@@ -81,6 +81,7 @@ examples-zig-wasm: recipes/text/markdown/80-html-page-wrap.wasm
 recipes: $(patsubst recipes/text/markdown/%.zig,recipes/text/markdown/%.wasm,$(wildcard recipes/text/markdown/*.zig))
 
 examples: examples-wat-wasm examples-c-wasm examples-zig-wasm
+modules: examples
 
 test: qip examples test-go test-zig test-snapshot
 	diff test/expected.txt test/latest.txt && echo "Snapshots pass."
@@ -168,13 +169,13 @@ test-go:
 	go test $(GO_TEST_PKGS)
 
 site/favicon.ico: qip-logo.svg
-	$(QIP_BIN) run -i qip-logo.svg -- examples/svg-rasterize.wasm examples/bmp-double.wasm examples/bmp-double.wasm examples/bmp-to-ico.wasm > $@
+	$(QIP_BIN) run -i qip-logo.svg -- modules/image/svg+xml/svg-rasterize.wasm modules/bytes/bmp-double.wasm modules/bytes/bmp-double.wasm modules/bytes/bmp-to-ico.wasm > $@
 
 install:
 	go install github.com/royalicing/qip@latest
 
 site-static:
-	$(QIP_BIN) route warc ./site --recipes recipes --forms examples --view-source | $(QIP_BIN) run examples/warc-check-broken-links.wasm examples/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
+	$(QIP_BIN) route warc ./site --recipes recipes --forms modules/form --modules modules --view-source | $(QIP_BIN) run modules/bytes/warc-check-broken-links.wasm modules/bytes/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
 
 defluff:
 	find . -name '.DS_Store' -type f -delete

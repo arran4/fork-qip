@@ -64,13 +64,13 @@ Examples:
 
 ```bash
 # i32 uniform
-qip run examples/text-to-bmp.wasm '?cols=120'
+qip run modules/utf8/text-to-bmp.wasm '?cols=120'
 
 # f32 uniforms
-qip image -i in.jpg -o out.png examples/rgba/color-halftone.wasm '?max_radius=2.0&angle_c=0.26'
+qip image -i in.jpg -o out.png modules/rgba/color-halftone.wasm '?max_radius=2.0&angle_c=0.26'
 
 # i64 uniform for packed 32-bit RGBA passed as hexadecimal (0xRRGGBBAA)
-qip run examples/svg-recolor-current-color.wasm '?color_rgba=0xff5511ff'
+qip run modules/image/svg+xml/svg-recolor-current-color.wasm '?color_rgba=0xff5511ff'
 ```
 
 Zig example:
@@ -140,7 +140,7 @@ These are the composition rules for run-module pipelines:
 - If a module does not export output content type and uses `output_bytes_cap`, the existing pipeline content type is preserved.
 - Generic UTF-8 utility modules (for example, uppercase/trim/rewrite helpers) should usually omit content type metadata so they can run on any UTF-8 text while preserving upstream content type.
 - Generic bytes utility modules (for example, `base64-encode.wasm` style byte transforms) should usually omit content type metadata so they can run on any bytes while preserving upstream content type.
-- Example: `curl ... | qip run examples/html-link-extractor.wasm` composes by trusting user-provided stdin for the first stage (`text/html` expected by the module).
+- Example: `curl ... | qip run modules/text/html/html-link-extractor.wasm` composes by trusting user-provided stdin for the first stage (`text/html` expected by the module).
 
 ## Input/Output Semantics
 
