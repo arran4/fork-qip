@@ -1,4 +1,4 @@
-.PHONY: compliance examples modules recipes examples-wat-wasm examples-c-wasm examples-zig-wasm test test-go site-static install
+.PHONY: compliance modules recipes modules-wat-wasm modules-c-wasm modules-zig-wasm test test-go site-static install
 
 default: qip compliance modules recipes
 
@@ -11,7 +11,7 @@ GO_FIX_PKGS := ./cmd/... ./internal/... ./tools/...
 GO_FMT_PKGS := . ./cmd/... ./internal/... ./tools/...
 GO_TEST_PKGS := . ./cmd/... ./internal/... ./tools/...
 QIP_BIN ?= ./qip
-QIP_GO_DEPS := main.go $(wildcard cmd/*.go) $(wildcard internal/*.go) $(wildcard internal/*/*.go)
+QIP_GO_DEPS := main.go $(wildcard cmd/*.go) $(wildcard internal/*.go) $(wildcard internal/*/*.go) $(wildcard embedded/*.js)
 
 qip: go.mod go.sum $(QIP_GO_DEPS)
 	go fix $(GO_FIX_PKGS)
@@ -23,65 +23,67 @@ compliance/%.wasm: compliance/%.wat
 
 compliance: $(patsubst compliance/%.wat,compliance/%.wasm,$(wildcard compliance/*.wat))
 
-examples/%.wasm: examples/%.wat
-	wat2wasm $< -o $@
-
-examples/rgba/%.wasm: examples/rgba/%.wat
-	wat2wasm $< -o $@
-
-examples-wat-wasm: $(patsubst examples/%.wat,examples/%.wasm,$(wildcard examples/*.wat)) $(patsubst examples/rgba/%.wat,examples/rgba/%.wasm,$(wildcard examples/rgba/*.wat))
-
-examples/sqlite-table-names.wasm: examples/sqlite-table-names.c
-	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_bytes_cap -Wl,--export=output_ptr -Wl,--export=output_utf8_cap -Oz -o $@
-
-examples/text-to-bmp.wasm: examples/text-to-bmp.c
-	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=uniform_set_leading -Wl,--export=uniform_set_cols -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
-
-examples/bmp-double.wasm: examples/bmp-double.c
-	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_bytes_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
-
-examples/bmp-double-simd.wasm: examples/bmp-double-simd.zig
-	$(ZIG_ENV) zig build-exe $< $(ZIG_WASM_FLAGS) -mcpu=generic+simd128 -femit-bin=$@
-
-examples/js-to-bmp.wasm: examples/js-to-bmp.c
-	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
-
 ZIG_CACHE_DIR ?= /tmp/zig-cache
 ZIG_GLOBAL_CACHE_DIR ?= /tmp/zig-global-cache
 ZIG_ENV := ZIG_CACHE_DIR=$(ZIG_CACHE_DIR) ZIG_GLOBAL_CACHE_DIR=$(ZIG_GLOBAL_CACHE_DIR)
 
-examples/c-to-bmp.wasm: examples/c-to-bmp.c
+MODULE_WAT_FILES := $(shell find modules -type f -name '*.wat')
+MODULE_C_FILES := $(shell find modules -type f -name '*.c')
+MODULE_ZIG_FILES := $(shell find modules -type f -name '*.zig')
+
+MODULE_WAT_TARGETS := $(patsubst %.wat,%.wasm,$(MODULE_WAT_FILES))
+MODULE_C_TARGETS := $(patsubst %.c,%.wasm,$(MODULE_C_FILES))
+MODULE_ZIG_TARGETS := $(patsubst %.zig,%.wasm,$(MODULE_ZIG_FILES))
+
+modules/%.wasm: modules/%.wat
+	wat2wasm $< -o $@
+
+modules/bytes/sqlite-table-names.wasm: modules/bytes/sqlite-table-names.c
+	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_bytes_cap -Wl,--export=output_ptr -Wl,--export=output_utf8_cap -Oz -o $@
+
+modules/utf8/text-to-bmp.wasm: modules/utf8/text-to-bmp.c
+	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=uniform_set_leading -Wl,--export=uniform_set_cols -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
+
+modules/bytes/bmp-double.wasm: modules/bytes/bmp-double.c
+	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_bytes_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
+
+modules/bytes/bmp-double-simd.wasm: modules/bytes/bmp-double-simd.zig
+	$(ZIG_ENV) zig build-exe $< $(ZIG_WASM_FLAGS) -mcpu=generic+simd128 -femit-bin=$@
+
+modules/text/javascript/js-to-bmp.wasm: modules/text/javascript/js-to-bmp.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
 
-recipes/text/markdown/20-html-page-wrap.wasm: recipes/text/markdown/styles.css recipes/text/markdown/header.html recipes/text/markdown/footer.html
+modules/text/x-c/c-to-bmp.wasm: modules/text/x-c/c-to-bmp.c
+	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
 
-examples/markdown-basic.wasm: recipes/text/markdown/10-markdown-basic.wasm
+recipes/text/markdown/80-html-page-wrap.wasm: recipes/text/markdown/styles.css recipes/text/markdown/header.html recipes/text/markdown/footer.html
+
+modules/text/markdown/markdown-basic.wasm: recipes/text/markdown/10-markdown-basic.wasm
 	cp $< $@
 
-examples/html-page-wrap.wasm: recipes/text/markdown/80-html-page-wrap.wasm
+modules/text/html/html-page-wrap.wasm: recipes/text/markdown/80-html-page-wrap.wasm
 	cp $< $@
 
-examples/%.wasm: examples/%.c
+modules/%.wasm: modules/%.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_utf8_cap -Oz -o $@
 
-examples-c-wasm: $(patsubst examples/%.c,examples/%.wasm,$(wildcard examples/*.c))
-
-examples/%.wasm: examples/%.zig
+modules/%.wasm: modules/%.zig
 	$(ZIG_ENV) zig build-exe $< $(ZIG_WASM_FLAGS) -femit-bin=$@
 
 recipes/%.wasm: recipes/%.zig
 	$(ZIG_ENV) zig build-exe $< $(ZIG_WASM_FLAGS) -femit-bin=$@
 
-examples-zig-wasm: $(patsubst examples/%.zig,examples/%.wasm,$(wildcard examples/*.zig))
-examples-zig-wasm: examples/markdown-basic.wasm
-examples-zig-wasm: examples/html-page-wrap.wasm
-examples-zig-wasm: recipes/text/markdown/10-markdown-basic.wasm
-examples-zig-wasm: recipes/text/markdown/80-html-page-wrap.wasm
+modules-wat-wasm: $(MODULE_WAT_TARGETS)
+modules-c-wasm: $(MODULE_C_TARGETS)
+modules-zig-wasm: $(MODULE_ZIG_TARGETS)
+modules-zig-wasm: modules/text/markdown/markdown-basic.wasm
+modules-zig-wasm: modules/text/html/html-page-wrap.wasm
+modules-zig-wasm: recipes/text/markdown/10-markdown-basic.wasm
+modules-zig-wasm: recipes/text/markdown/80-html-page-wrap.wasm
 
 recipes: $(patsubst recipes/text/markdown/%.zig,recipes/text/markdown/%.wasm,$(wildcard recipes/text/markdown/*.zig))
 
-examples: examples-wat-wasm examples-c-wasm examples-zig-wasm
-modules: examples
+modules: modules-wat-wasm modules-c-wasm modules-zig-wasm
 
 test: qip modules test-go test-zig test-snapshot
 	diff test/expected.txt test/latest.txt && echo "Snapshots pass."
@@ -157,7 +159,7 @@ test-snapshot: qip modules
 	@printf "%s\n" "module: wasm-to-js.wasm" >> test/latest.txt
 	@cat modules/utf8/hello.wasm | $(QIP_BIN) run modules/bytes/wasm-to-js.wasm >> test/latest.txt
 
-ZIG_TEST_FILES := $(wildcard examples/*.zig) $(wildcard recipes/text/markdown/*.zig)
+ZIG_TEST_FILES := $(MODULE_ZIG_FILES) $(wildcard recipes/text/markdown/*.zig)
 
 test-zig: $(ZIG_TEST_FILES)
 	@for f in $^; do \
