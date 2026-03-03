@@ -1,14 +1,12 @@
-# qip: _pockets of speed safely sewn together_
+# qip
 
-## Small, secure, and predictable software components
+## _Vibe once, run anywhere_
 
-`qip` is a tool for running vibe-coded WebAssembly modules in a strict, composable pipeline. Each module does one focused job: parser, validator, shader, converter, renderer, and so on.
+`qip` lets you compose vibe-coded WebAssembly modules that process text/image/data in a secure pipeline.
 
-It lets you process text/images/data then compose modules into ever greater units such as a website or image effect pipeline.
+Each module does one focused job: parser, validator, shader, converter, renderer, and so on. You then compose modules into ever greater units using the built-in web router or into a image effect pipeline.
 
-Think of it as “React components but for everything and that run anywhere.”
-
-Planned host integrations include Swift, React, and Elixir, pushing further toward write once, run anywhere.
+Think of them as “React components for everything that run everywhere.”
 
 ## Install
 
