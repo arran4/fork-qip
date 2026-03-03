@@ -238,10 +238,54 @@ function qipPreviewExtractUniforms(sourceElement) {
     if (rawValue === null) {
       continue;
     }
-    pairs.push([key, rawValue]);
+    const trimmed = rawValue.trim();
+    if (trimmed !== "") {
+      pairs.push({
+        key,
+        staticValue: rawValue,
+        inputElement: null,
+      });
+      continue;
+    }
+    const inputElement = qipPreviewFindUniformInputElement(sourceElement, key);
+    if (!inputElement) {
+      throw new Error(
+        "<source> uniform " + key + " requires an input with name=\"uniform-" + key + "\" in the same <qip-preview> when " + attrName + " is empty",
+      );
+    }
+    pairs.push({
+      key,
+      staticValue: null,
+      inputElement,
+    });
   }
-  pairs.sort((a, b) => a[0].localeCompare(b[0]));
+  pairs.sort((a, b) => a.key.localeCompare(b.key));
   return pairs;
+}
+
+function qipPreviewFindUniformInputElement(sourceElement, key) {
+  const name = "uniform-" + key;
+  const root = sourceElement.closest("qip-preview");
+  if (root) {
+    const named = root.querySelectorAll("[name]");
+    for (const candidate of named) {
+      if (typeof candidate.getAttribute === "function" && candidate.getAttribute("name") === name) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function qipPreviewReadUniformValue(uniform) {
+  if (uniform.inputElement) {
+    const element = uniform.inputElement;
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+      return element.value || "";
+    }
+    return (element.textContent || "").trim();
+  }
+  return uniform.staticValue || "";
 }
 
 async function qipPreviewLoadStage(sourceElement) {
@@ -340,8 +384,8 @@ async function qipPreviewRunStage(stage, input) {
   }
 
   qipPreviewWriteInput(exportsObj, input.bytes);
-  for (const pair of stage.uniforms) {
-    qipPreviewApplyUniform(exportsObj, pair[0], pair[1]);
+  for (const uniform of stage.uniforms) {
+    qipPreviewApplyUniform(exportsObj, uniform.key, qipPreviewReadUniformValue(uniform));
   }
 
   const outputLen = qipPreviewToI32(exportsObj.run(input.bytes.length), "run");
@@ -371,7 +415,7 @@ class QIPPreviewElement extends HTMLElement {
     this._inputElement = null;
     this._outputElement = null;
     this._runToken = 0;
-    this._boundInputListener = null;
+    this._boundControlListener = null;
     this._objectURL = "";
     this._moduleBytesTotal = 0;
   }
@@ -390,11 +434,11 @@ class QIPPreviewElement extends HTMLElement {
   }
 
   disconnectedCallback() {
-    if (this._inputElement && this._boundInputListener) {
-      this._inputElement.removeEventListener("input", this._boundInputListener);
-      this._inputElement.removeEventListener("change", this._boundInputListener);
+    if (this._boundControlListener) {
+      this.removeEventListener("input", this._boundControlListener);
+      this.removeEventListener("change", this._boundControlListener);
     }
-    this._boundInputListener = null;
+    this._boundControlListener = null;
     this._revokeObjectURL();
   }
 
@@ -422,11 +466,11 @@ class QIPPreviewElement extends HTMLElement {
       throw new Error("<qip-preview> requires a child output with name=\"output\"");
     }
 
-    this._boundInputListener = () => {
+    this._boundControlListener = () => {
       this._scheduleRun();
     };
-    this._inputElement.addEventListener("input", this._boundInputListener);
-    this._inputElement.addEventListener("change", this._boundInputListener);
+    this.addEventListener("input", this._boundControlListener);
+    this.addEventListener("change", this._boundControlListener);
   }
 
   _scheduleRun() {
@@ -498,6 +542,7 @@ class QIPPreviewElement extends HTMLElement {
   _renderError(err) {
     if (!this._outputElement) {
       const fallback = document.createElement("pre");
+      fallback.setAttribute("role", "alert");
       const message = err instanceof Error ? err.message : String(err);
       fallback.textContent = "Preview error: " + message;
       this.replaceChildren(fallback);
@@ -505,6 +550,7 @@ class QIPPreviewElement extends HTMLElement {
     }
     this._revokeObjectURL();
     const pre = document.createElement("pre");
+    pre.setAttribute("role", "alert");
     const message = err instanceof Error ? err.message : String(err);
     pre.textContent = "Preview error: " + message;
     this._outputElement.replaceChildren(pre);

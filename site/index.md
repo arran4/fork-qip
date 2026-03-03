@@ -38,7 +38,7 @@ echo -n "There are eight words here. Try typing more… " | qip run modules/utf8
 <form aria-labelledby="form-markdown-heading">
     <h3 id="form-markdown-heading">Recolor svg icon as orange and convert to favicon (js)</h3>
     <qip-preview>
-        <source src="/modules/image/svg+xml/svg-recolor-current-color.wasm" type="application/wasm" data-uniform-color_rgba="0xff7722ff" />
+        <source src="/modules/image/svg+xml/svg-recolor-current-color.wasm" type="application/wasm" data-uniform-color_rgba />
         <source src="/modules/image/svg+xml/svg-rasterize.wasm" type="application/wasm" />
         <source src="/modules/image/bmp/bmp-to-ico.wasm" type="application/wasm" />
         <textarea name="input" rows="9" cols="40">&lt;svg class=&quot;lucide lucide-smile&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;24&quot; height=&quot;24&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;
@@ -48,6 +48,7 @@ echo -n "There are eight words here. Try typing more… " | qip run modules/utf8
   &lt;line x1=&quot;9&quot; x2=&quot;9.01&quot; y1=&quot;9&quot; y2=&quot;9&quot; /&gt;
   &lt;line x1=&quot;15&quot; x2=&quot;15.01&quot; y1=&quot;9&quot; y2=&quot;9&quot; /&gt;
 &lt;/svg&gt;</textarea>
+        <input name="uniform-color_rgba" value="0xff7722ff" />
         <output name="output" style="zoom: 2; image-rendering: pixelated"></output>
     </qip-preview>
 </form>
