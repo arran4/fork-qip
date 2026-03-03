@@ -190,6 +190,8 @@ form {
     --invert: 1;
 
     img {
+      display: block;
+      margin: auto;
       border: 0.5px solid gray;
     }
   }

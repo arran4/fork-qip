@@ -48,7 +48,7 @@ echo -n "There are eight words here. Try typing more… " | qip run modules/utf8
   &lt;line x1=&quot;9&quot; x2=&quot;9.01&quot; y1=&quot;9&quot; y2=&quot;9&quot; /&gt;
   &lt;line x1=&quot;15&quot; x2=&quot;15.01&quot; y1=&quot;9&quot; y2=&quot;9&quot; /&gt;
 &lt;/svg&gt;</textarea>
-        <input name="uniform-color_rgba" value="0xff7722ff" />
+        <input type="color" name="uniform-color_rgba" value="#ff7722" />
         <output name="output" style="zoom: 2; image-rendering: pixelated"></output>
     </qip-preview>
 </form>
@@ -66,18 +66,24 @@ modules/image/bmp/bmp-to-ico.wasm \
 ---
 
 <form aria-labelledby="form-markdown-heading">
-    <h3 id="form-markdown-heading">Convert Markdown to HTML</h3>
+    <h3 id="form-markdown-heading">Markdown to HTML (js)</h3>
     <qip-preview>
         <source src="/modules/text/markdown/commonmark.0.31.2.wasm" type="application/wasm" />
         <textarea name="input" rows="7" cols="40"># Write some CommonMark *Markdown*
 &#10;- Here’s a [link](https&colon;//example.com) in a list
 &#10;```bash
 qip help run
-```
-</textarea>
+```</textarea>
     <output name="output"></output>
     </qip-preview>
 </form>
+
+### Markdown to HTML (cli)
+
+```bash
+echo '# Write some CommonMark *Markdown*' | qip run modules/text/markdown/commonmark.0.31.2.wasm
+# <h1>Write some CommonMark <em>Markdown</em></h1>
+```
 
 ---
 

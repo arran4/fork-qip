@@ -79,41 +79,31 @@ function qipPreviewReadDeclaredContentType(exportsObj, ptrExport, sizeExport) {
   return qipPreviewNormalizeContentType(text);
 }
 
-function qipPreviewParseUniformValue(rawValue) {
+function qipPreviewParseUniformAttempts(rawValue) {
   const value = String(rawValue).trim();
   if (value === "") {
     throw new Error("uniform value must not be empty");
   }
 
-  if (/^[+-]?0x[0-9a-f]+$/i.test(value)) {
-    const bigValue = BigInt(value);
-    const numberValue = Number(bigValue);
-    return {
-      preferBigInt: true,
-      bigintValue: bigValue,
-      numberValue: Number.isSafeInteger(numberValue) ? numberValue : null,
-    };
+  const parsedColor = qipPreviewParseColorInputValue(value);
+  if (parsedColor !== null) {
+    return [parsedColor, BigInt(parsedColor)];
   }
 
-  if (/^[+-]?\d+$/.test(value)) {
+  if (/^[+-]?0x[0-9a-f]+$/i.test(value) || /^[+-]?\d+$/.test(value)) {
     const bigValue = BigInt(value);
     const numberValue = Number(bigValue);
-    return {
-      preferBigInt: !Number.isSafeInteger(numberValue),
-      bigintValue: bigValue,
-      numberValue: Number.isSafeInteger(numberValue) ? numberValue : null,
-    };
+    if (Number.isSafeInteger(numberValue)) {
+      return [numberValue, bigValue];
+    }
+    return [bigValue];
   }
 
   const floatValue = Number(value);
   if (!Number.isFinite(floatValue)) {
     throw new Error("uniform value is not a finite number");
   }
-  return {
-    preferBigInt: false,
-    bigintValue: null,
-    numberValue: floatValue,
-  };
+  return [floatValue];
 }
 
 function qipPreviewApplyUniform(exportsObj, key, rawValue) {
@@ -122,19 +112,18 @@ function qipPreviewApplyUniform(exportsObj, key, rawValue) {
   if (typeof setter !== "function") {
     throw new Error("preview module missing export " + setterName);
   }
-  const parsed = qipPreviewParseUniformValue(rawValue);
-  const attempts = [];
-  if (parsed.preferBigInt && parsed.bigintValue !== null) {
-    attempts.push(parsed.bigintValue);
-  }
-  if (parsed.numberValue !== null) {
-    attempts.push(parsed.numberValue);
-  }
-  if (!parsed.preferBigInt && parsed.bigintValue !== null) {
-    attempts.push(parsed.bigintValue);
-  }
-  if (attempts.length === 0) {
-    throw new Error("uniform value has no supported numeric representation");
+  let attempts;
+  try {
+    attempts = qipPreviewParseUniformAttempts(rawValue);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error("qip-preview uniform parse error", {
+      key,
+      value: rawValue,
+      valueType: typeof rawValue,
+      error: detail,
+    });
+    throw err;
   }
 
   let lastErr = null;
@@ -148,6 +137,13 @@ function qipPreviewApplyUniform(exportsObj, key, rawValue) {
   }
 
   const detail = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  console.error("qip-preview uniform set error", {
+    key,
+    value: rawValue,
+    valueType: typeof rawValue,
+    attempts: attempts.map((v) => typeof v === "bigint" ? (v.toString() + "n") : String(v)),
+    error: detail,
+  });
   throw new Error("failed to set uniform " + key + ": " + detail);
 }
 
@@ -280,12 +276,52 @@ function qipPreviewFindUniformInputElement(sourceElement, key) {
 function qipPreviewReadUniformValue(uniform) {
   if (uniform.inputElement) {
     const element = uniform.inputElement;
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+    if (element instanceof HTMLInputElement) {
+      const inputType = (element.type || "").toLowerCase();
+      const declaredType = (element.getAttribute("type") || "").toLowerCase();
+      if (inputType === "color" || declaredType === "color") {
+        const parsedColor = qipPreviewParseColorInputValue(element.value || "");
+        if (parsedColor === null) {
+          throw new Error("color uniform input must be a hex color (#rgb, #rrggbb, #rgba, #rrggbbaa)");
+        }
+        return parsedColor;
+      }
+      return element.value || "";
+    }
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
       return element.value || "";
     }
     return (element.textContent || "").trim();
   }
   return uniform.staticValue || "";
+}
+
+function qipPreviewParseColorInputValue(rawValue) {
+  const value = String(rawValue).trim();
+  let hex = "";
+  if (/^#[0-9a-f]{3}$/i.test(value)) {
+    const r = value[1];
+    const g = value[2];
+    const b = value[3];
+    hex = r + r + g + g + b + b + "ff";
+  } else if (/^#[0-9a-f]{4}$/i.test(value)) {
+    const r = value[1];
+    const g = value[2];
+    const b = value[3];
+    const a = value[4];
+    hex = r + r + g + g + b + b + a + a;
+  } else if (/^#[0-9a-f]{6}$/i.test(value)) {
+    hex = value.slice(1) + "ff";
+  } else if (/^#[0-9a-f]{8}$/i.test(value)) {
+    hex = value.slice(1);
+  } else {
+    return null;
+  }
+  const parsed = Number.parseInt(hex, 16);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return parsed >>> 0;
 }
 
 async function qipPreviewLoadStage(sourceElement) {
@@ -417,7 +453,10 @@ class QIPPreviewElement extends HTMLElement {
     this._runToken = 0;
     this._boundControlListener = null;
     this._objectURL = "";
+    this._imageElement = null;
     this._moduleBytesTotal = 0;
+    this._runRequestID = 0;
+    this._queuedRunToken = 0;
   }
 
   async connectedCallback() {
@@ -437,6 +476,10 @@ class QIPPreviewElement extends HTMLElement {
     if (this._boundControlListener) {
       this.removeEventListener("input", this._boundControlListener);
       this.removeEventListener("change", this._boundControlListener);
+    }
+    if (this._runRequestID !== 0 && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(this._runRequestID);
+      this._runRequestID = 0;
     }
     this._boundControlListener = null;
     this._revokeObjectURL();
@@ -475,11 +518,24 @@ class QIPPreviewElement extends HTMLElement {
 
   _scheduleRun() {
     const token = ++this._runToken;
-    this._runPipeline(token).catch((err) => {
-      if (token === this._runToken) {
-        this._renderError(err);
-      }
-    });
+    this._queuedRunToken = token;
+    if (this._runRequestID !== 0) {
+      return;
+    }
+    const flushRun = () => {
+      this._runRequestID = 0;
+      const nextToken = this._queuedRunToken;
+      this._runPipeline(nextToken).catch((err) => {
+        if (nextToken === this._runToken) {
+          this._renderError(err);
+        }
+      });
+    };
+    if (typeof requestAnimationFrame === "function") {
+      this._runRequestID = requestAnimationFrame(flushRun);
+      return;
+    }
+    flushRun();
   }
 
   async _runPipeline(token) {
@@ -514,18 +570,26 @@ class QIPPreviewElement extends HTMLElement {
     if (!this._outputElement) {
       return;
     }
-    this._revokeObjectURL();
     const contentType = qipPreviewGuessDisplayContentType(result.bytes, result.contentType);
     if (contentType.startsWith("image/")) {
       const blob = new Blob([result.bytes], { type: contentType });
-      this._objectURL = URL.createObjectURL(blob);
-      const image = document.createElement("img");
-      image.src = this._objectURL;
-      image.alt = "qip-preview output";
-      this._outputElement.replaceChildren(image);
+      const nextURL = URL.createObjectURL(blob);
+      const prevURL = this._objectURL;
+      this._objectURL = nextURL;
+      if (!this._imageElement || this._imageElement.parentElement !== this._outputElement) {
+        this._imageElement = document.createElement("img");
+        this._imageElement.alt = "qip-preview output";
+        this._outputElement.replaceChildren(this._imageElement);
+      }
+      this._imageElement.src = nextURL;
+      if (prevURL !== "") {
+        URL.revokeObjectURL(prevURL);
+      }
       return;
     }
 
+    this._imageElement = null;
+    this._revokeObjectURL();
     const pre = document.createElement("pre");
     if (contentType === "" || qipPreviewIsTextContentType(contentType)) {
       try {
@@ -549,6 +613,7 @@ class QIPPreviewElement extends HTMLElement {
       return;
     }
     this._revokeObjectURL();
+    this._imageElement = null;
     const pre = document.createElement("pre");
     pre.setAttribute("role", "alert");
     const message = err instanceof Error ? err.message : String(err);
