@@ -2,6 +2,8 @@
   font-size: 100%;
   line-height: 1.5;
 
+  --paragraph-leading: 1rlh;
+
   --dark: 1;
   --invert: 0;
 
@@ -11,6 +13,7 @@
   --bg-dark: #0f1115;
   --link-light: #0051dc;
   --link-dark: #8ab4ff;
+  --output-tint: rgb(146, 211, 255);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -21,7 +24,8 @@
 :root,
 header,
 footer,
-section {
+section,
+output {
   --light-dark-ratio: calc(
     var(--dark) * (1 - var(--invert)) + (1 - var(--dark)) * var(--invert)
   );
@@ -41,6 +45,9 @@ section {
     var(--link-light) calc((1 - var(--light-dark-ratio)) * 100%),
     var(--link-dark) calc(var(--light-dark-ratio) * 100%)
   );
+
+  color: var(--text);
+  background: var(--bg);
 }
 
 * {
@@ -55,16 +62,20 @@ body {
   min-height: 100vh;
   color: var(--text);
   background: var(--bg);
-  font-family: system-ui, sans-serif;
+  font-family: ui-monospace, monospace;
 }
 a {
   color: var(--link);
+}
+hr {
+  color: inherit;
+  opacity: 25%;
 }
 
 header[role="banner"],
 footer[role="contentinfo"] {
   --invert: 1;
-  background: color-mix(var(--bg) 95%, white);
+  /* background: color-mix(var(--bg) 95%, white); */
 
   nav {
     padding: 1lh 0;
@@ -99,20 +110,37 @@ main {
   p,
   ul,
   ol,
-  pre {
-    margin-bottom: 1rlh;
+  blockquote,
+  pre,
+  form,
+  hr {
+    margin-bottom: var(--paragraph-leading);
   }
   h1 {
+    font-size: 3rem;
+    line-height: 3rlh;
+  }
+  h2 {
     font-size: 2rem;
     line-height: 2rlh;
   }
-  h2 {
+  h3 {
     font-size: 1.25rem;
+    line-height: 1rlh;
+  }
+  blockquote {
+    font-style: italic;
   }
 }
 code,
-pre {
+pre,
+[name="input"],
+output {
   font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+code:not(pre *) {
+  font-size: 100%;
 }
 pre {
   overflow: auto;
@@ -125,4 +153,44 @@ img {
 hr {
   border: none;
   border-top: 1px solid currentColor;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+
+  *:not(h2, h3, h4, blockquote) {
+    --paragraph-leading: 0;
+  }
+  qip-preview {
+    display: contents;
+
+    &::after {
+      text-align: center;
+      font-size: 85%;
+      opacity: 50%;
+      content: attr(data-module-bytes-total) " bytes of wasm took "
+        attr(data-run-ms) " ms";
+    }
+  }
+  input:not([type]),
+  textarea {
+    padding: 0.5rlh 1em;
+    background: color-mix(in srgb, var(--bg) 90%, white 10%);
+    color: var(--text);
+    border-color: color-mix(in srgb, var(--bg) 70%, white 30%);
+  }
+  output {
+    display: inline-block;
+    padding: 0.5rlh 1em;
+    color: color-mix(in srgb, var(--text) 50%, var(--output-tint) 50%);
+    /* background: color-mix(in srgb, var(--bg) 50%, var(--output-tint) 50%);
+    color: var(--text);
+    border-color: color-mix(in srgb, var(--bg) 70%, var(--output-tint) 30%); */
+    --invert: 1;
+
+    img {
+      border: 0.5px solid gray;
+    }
+  }
 }

@@ -10,6 +10,7 @@ const EMBEDDED_HEADER = std.mem.trimRight(u8, @embedFile("header.html"), "\r\n")
 const EMBEDDED_FOOTER = std.mem.trimRight(u8, @embedFile("footer.html"), "\r\n");
 
 comptime {
+    @setEvalBranchQuota(1_000_000);
     if (containsClosingStyleTag(EMBEDDED_STYLES)) {
         @compileError("styles.css contains closing </style sequence; remove it or split as <\\/style");
     }

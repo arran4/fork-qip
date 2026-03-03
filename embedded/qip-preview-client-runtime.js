@@ -1,6 +1,13 @@
 const qipPreviewTextEncoder = new TextEncoder();
 const qipPreviewTextDecoder = new TextDecoder("utf-8", { fatal: true });
 
+function qipPreviewNowMS() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
 function qipPreviewToI32(value, label) {
   if (typeof value === "number") {
     return value | 0;
@@ -256,6 +263,7 @@ async function qipPreviewLoadStage(sourceElement) {
   return {
     src: sourceURL,
     module,
+    moduleBytes: bytes.byteLength,
     uniforms: qipPreviewExtractUniforms(sourceElement),
   };
 }
@@ -365,6 +373,7 @@ class QIPPreviewElement extends HTMLElement {
     this._runToken = 0;
     this._boundInputListener = null;
     this._objectURL = "";
+    this._moduleBytesTotal = 0;
   }
 
   async connectedCallback() {
@@ -396,9 +405,13 @@ class QIPPreviewElement extends HTMLElement {
     }
 
     this._stages = [];
+    this._moduleBytesTotal = 0;
     for (const sourceElement of sourceElements) {
-      this._stages.push(await qipPreviewLoadStage(sourceElement));
+      const stage = await qipPreviewLoadStage(sourceElement);
+      this._stages.push(stage);
+      this._moduleBytesTotal += stage.moduleBytes;
     }
+    this.dataset.moduleBytesTotal = String(this._moduleBytesTotal);
 
     this._inputElement = this.querySelector("[name='input']");
     if (!this._inputElement) {
@@ -429,20 +442,28 @@ class QIPPreviewElement extends HTMLElement {
     if (!this._inputElement || !this._outputElement) {
       throw new Error("qip-preview is not initialized");
     }
-    let current = {
-      bytes: qipPreviewReadInputBytes(this._inputElement),
-      contentType: "",
-    };
-    for (const stage of this._stages) {
-      current = await qipPreviewRunStage(stage, current);
+    const startedMS = qipPreviewNowMS();
+    try {
+      let current = {
+        bytes: qipPreviewReadInputBytes(this._inputElement),
+        contentType: "",
+      };
+      for (const stage of this._stages) {
+        current = await qipPreviewRunStage(stage, current);
+        if (token !== this._runToken) {
+          return;
+        }
+      }
       if (token !== this._runToken) {
         return;
       }
+      this._renderResult(current);
+    } finally {
+      if (token === this._runToken) {
+        const elapsedMS = Math.max(0, Math.round(qipPreviewNowMS() - startedMS));
+        this.dataset.runMs = String(elapsedMS);
+      }
     }
-    if (token !== this._runToken) {
-      return;
-    }
-    this._renderResult(current);
   }
 
   _renderResult(result) {
