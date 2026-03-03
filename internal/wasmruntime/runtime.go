@@ -35,7 +35,7 @@ func HumanizeExecutionError(ctx context.Context, err error) error {
 		timeoutText = " (" + timeout.String() + ")"
 	}
 	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
-		return errors.New("Wasm module exceeded the execution time limit" + timeoutText)
+		return errors.New("Wasm module exceeded the execution time limit" + timeoutText + ", please increase --timeout-ms")
 	}
 	if errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled") {
 		return errors.New("Wasm module execution was canceled")
