@@ -1,5 +1,13 @@
 const std = @import("std");
 
+// TODO(svg): Required paint parsing to be practical for SVG icons/text:
+// - Add css color functions: rgb(), rgba(), hsl(), hsla()
+// - Add currentColor support for fill/stroke
+// Not required for this module:
+// - No var() / CSS custom properties
+// - No calc() in paint values
+// - No stylesheet/style="" cascade engine
+
 const INPUT_CAP: u32 = 1024 * 1024;
 const OUTPUT_CAP: u32 = 16 * 1024 * 1024;
 const INPUT_CONTENT_TYPE = "image/svg+xml";
@@ -7,6 +15,7 @@ const OUTPUT_CONTENT_TYPE = "image/bmp";
 
 var input_buf: [INPUT_CAP]u8 = undefined;
 var output_buf: [OUTPUT_CAP]u8 = undefined;
+var background_color_rgba: u32 = 0x00000000; // 0xRRGGBBAA, default transparent black
 
 export fn input_ptr() u32 {
     return @as(u32, @intCast(@intFromPtr(&input_buf)));
@@ -46,6 +55,24 @@ const Color = struct {
     b: u8,
     a: u8,
 };
+
+fn colorFromRgba(value: u32) Color {
+    return .{
+        .r = @intCast((value >> 24) & 0xFF),
+        .g = @intCast((value >> 16) & 0xFF),
+        .b = @intCast((value >> 8) & 0xFF),
+        .a = @intCast(value & 0xFF),
+    };
+}
+
+export fn uniform_set_background_color_rgba(value: u32) u32 {
+    background_color_rgba = value;
+    return background_color_rgba;
+}
+
+export fn uniform_set_background_color(value: u32) u32 {
+    return uniform_set_background_color_rgba(value);
+}
 
 const Mat = struct {
     a: f32,
@@ -88,6 +115,14 @@ const Line = struct {
 };
 
 const MAX_POINTS: usize = 256;
+const MAX_PATH_SEGMENTS: usize = 4096;
+
+const PathSegment = struct {
+    ax: f32,
+    ay: f32,
+    bx: f32,
+    by: f32,
+};
 
 const ParserCtx = struct {
     input: []const u8,
@@ -216,6 +251,21 @@ fn parseColor(value: []const u8) ?Color {
     }
     if (strEq(value, "none")) {
         return Color{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    }
+    if (strEq(value, "black")) {
+        return Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    }
+    if (strEq(value, "white")) {
+        return Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    }
+    if (strEq(value, "red")) {
+        return Color{ .r = 255, .g = 0, .b = 0, .a = 255 };
+    }
+    if (strEq(value, "green")) {
+        return Color{ .r = 0, .g = 128, .b = 0, .a = 255 };
+    }
+    if (strEq(value, "blue")) {
+        return Color{ .r = 0, .g = 0, .b = 255, .a = 255 };
     }
     return null;
 }
@@ -785,6 +835,296 @@ fn drawQuadStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width: f
     }
 }
 
+fn addPathSegment(segments: *[MAX_PATH_SEGMENTS]PathSegment, seg_count: *usize, ax: f32, ay: f32, bx: f32, by: f32) void {
+    if (seg_count.* >= MAX_PATH_SEGMENTS) return;
+    segments[seg_count.*] = .{ .ax = ax, .ay = ay, .bx = bx, .by = by };
+    seg_count.* += 1;
+}
+
+fn drawCubicFillSegments(segments: *[MAX_PATH_SEGMENTS]PathSegment, seg_count: *usize, p0: [2]f32, p1: [2]f32, p2: [2]f32, p3: [2]f32) void {
+    const steps: usize = 20;
+    var prev = p0;
+    var i: usize = 1;
+    while (i <= steps) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(steps));
+        const pt = cubicPoint(t, p0, p1, p2, p3);
+        addPathSegment(segments, seg_count, prev[0], prev[1], pt[0], pt[1]);
+        prev = pt;
+    }
+}
+
+fn drawQuadFillSegments(segments: *[MAX_PATH_SEGMENTS]PathSegment, seg_count: *usize, p0: [2]f32, p1: [2]f32, p2: [2]f32) void {
+    const steps: usize = 14;
+    var prev = p0;
+    var i: usize = 1;
+    while (i <= steps) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(steps));
+        const pt = quadPoint(t, p0, p1, p2);
+        addPathSegment(segments, seg_count, prev[0], prev[1], pt[0], pt[1]);
+        prev = pt;
+    }
+}
+
+fn pointLeftOfSegment(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) f32 {
+    return (bx - ax) * (py - ay) - (px - ax) * (by - ay);
+}
+
+fn pathPointsEqual(a: [2]f32, b: [2]f32) bool {
+    return @abs(a[0] - b[0]) <= 0.0001 and @abs(a[1] - b[1]) <= 0.0001;
+}
+
+fn drawPathFill(ctx: *ParserCtx, transform: Mat, color: Color, d: []const u8) void {
+    if (color.a == 0) return;
+    var segments: [MAX_PATH_SEGMENTS]PathSegment = undefined;
+    var seg_count: usize = 0;
+    var idx: usize = 0;
+    var cmd: u8 = 0;
+    var cur = [2]f32{ 0, 0 };
+    var sub_start = [2]f32{ 0, 0 };
+    var sub_active = false;
+    var sub_has_edges = false;
+    var prev_cubic_ctrl = [2]f32{ 0, 0 };
+    var prev_quad_ctrl = [2]f32{ 0, 0 };
+    var has_prev_cubic = false;
+    var has_prev_quad = false;
+
+    while (idx < d.len) {
+        skipWsCommas(d, &idx);
+        if (idx >= d.len) break;
+
+        if (isAlpha(d[idx])) {
+            cmd = d[idx];
+            idx += 1;
+        } else if (cmd == 0) {
+            break;
+        }
+
+        const cmd_upper = toUpperASCII(cmd);
+        const rel = cmd >= 'a' and cmd <= 'z';
+
+        switch (cmd_upper) {
+            'M' => {
+                if (sub_active and sub_has_edges and !pathPointsEqual(cur, sub_start)) {
+                    addPathSegment(&segments, &seg_count, cur[0], cur[1], sub_start[0], sub_start[1]);
+                }
+                const x = parsePathNumber(d, &idx) orelse break;
+                const y = parsePathNumber(d, &idx) orelse break;
+                cur = if (rel) .{ cur[0] + x, cur[1] + y } else .{ x, y };
+                sub_start = cur;
+                sub_active = true;
+                sub_has_edges = false;
+                has_prev_cubic = false;
+                has_prev_quad = false;
+
+                while (true) {
+                    const lx = parsePathNumber(d, &idx) orelse break;
+                    const ly = parsePathNumber(d, &idx) orelse break;
+                    const next = if (rel) .{ cur[0] + lx, cur[1] + ly } else .{ lx, ly };
+                    addPathSegment(&segments, &seg_count, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    sub_has_edges = true;
+                }
+            },
+            'L' => {
+                while (true) {
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const next = if (rel) .{ cur[0] + x, cur[1] + y } else .{ x, y };
+                    addPathSegment(&segments, &seg_count, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    sub_has_edges = true;
+                    has_prev_cubic = false;
+                    has_prev_quad = false;
+                }
+            },
+            'H' => {
+                while (true) {
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const nx = if (rel) cur[0] + x else x;
+                    const next = [2]f32{ nx, cur[1] };
+                    addPathSegment(&segments, &seg_count, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    sub_has_edges = true;
+                    has_prev_cubic = false;
+                    has_prev_quad = false;
+                }
+            },
+            'V' => {
+                while (true) {
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const ny = if (rel) cur[1] + y else y;
+                    const next = [2]f32{ cur[0], ny };
+                    addPathSegment(&segments, &seg_count, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    sub_has_edges = true;
+                    has_prev_cubic = false;
+                    has_prev_quad = false;
+                }
+            },
+            'C' => {
+                while (true) {
+                    const x1 = parsePathNumber(d, &idx) orelse break;
+                    const y1 = parsePathNumber(d, &idx) orelse break;
+                    const x2 = parsePathNumber(d, &idx) orelse break;
+                    const y2 = parsePathNumber(d, &idx) orelse break;
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const c1 = if (rel) [2]f32{ cur[0] + x1, cur[1] + y1 } else [2]f32{ x1, y1 };
+                    const c2 = if (rel) [2]f32{ cur[0] + x2, cur[1] + y2 } else [2]f32{ x2, y2 };
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawCubicFillSegments(&segments, &seg_count, cur, c1, c2, next);
+                    cur = next;
+                    sub_has_edges = true;
+                    prev_cubic_ctrl = c2;
+                    has_prev_cubic = true;
+                    has_prev_quad = false;
+                }
+            },
+            'S' => {
+                while (true) {
+                    const x2 = parsePathNumber(d, &idx) orelse break;
+                    const y2 = parsePathNumber(d, &idx) orelse break;
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const c1 = if (has_prev_cubic) [2]f32{ 2.0 * cur[0] - prev_cubic_ctrl[0], 2.0 * cur[1] - prev_cubic_ctrl[1] } else cur;
+                    const c2 = if (rel) [2]f32{ cur[0] + x2, cur[1] + y2 } else [2]f32{ x2, y2 };
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawCubicFillSegments(&segments, &seg_count, cur, c1, c2, next);
+                    cur = next;
+                    sub_has_edges = true;
+                    prev_cubic_ctrl = c2;
+                    has_prev_cubic = true;
+                    has_prev_quad = false;
+                }
+            },
+            'Q' => {
+                while (true) {
+                    const x1 = parsePathNumber(d, &idx) orelse break;
+                    const y1 = parsePathNumber(d, &idx) orelse break;
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const c = if (rel) [2]f32{ cur[0] + x1, cur[1] + y1 } else [2]f32{ x1, y1 };
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawQuadFillSegments(&segments, &seg_count, cur, c, next);
+                    cur = next;
+                    sub_has_edges = true;
+                    prev_quad_ctrl = c;
+                    has_prev_quad = true;
+                    has_prev_cubic = false;
+                }
+            },
+            'T' => {
+                while (true) {
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const c = if (has_prev_quad) [2]f32{ 2.0 * cur[0] - prev_quad_ctrl[0], 2.0 * cur[1] - prev_quad_ctrl[1] } else cur;
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawQuadFillSegments(&segments, &seg_count, cur, c, next);
+                    cur = next;
+                    sub_has_edges = true;
+                    prev_quad_ctrl = c;
+                    has_prev_quad = true;
+                    has_prev_cubic = false;
+                }
+            },
+            'A' => {
+                // Arc support fallback: connect start->end so closed shapes still fill.
+                while (true) {
+                    _ = parsePathNumber(d, &idx) orelse break; // rx
+                    _ = parsePathNumber(d, &idx) orelse break; // ry
+                    _ = parsePathNumber(d, &idx) orelse break; // x-axis-rotation
+                    _ = parsePathNumber(d, &idx) orelse break; // large-arc-flag
+                    _ = parsePathNumber(d, &idx) orelse break; // sweep-flag
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    addPathSegment(&segments, &seg_count, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    sub_has_edges = true;
+                    has_prev_cubic = false;
+                    has_prev_quad = false;
+                }
+            },
+            'Z' => {
+                if (sub_active and sub_has_edges and !pathPointsEqual(cur, sub_start)) {
+                    addPathSegment(&segments, &seg_count, cur[0], cur[1], sub_start[0], sub_start[1]);
+                }
+                cur = sub_start;
+                sub_has_edges = false;
+                has_prev_cubic = false;
+                has_prev_quad = false;
+            },
+            else => break,
+        }
+    }
+
+    if (sub_active and sub_has_edges and !pathPointsEqual(cur, sub_start)) {
+        addPathSegment(&segments, &seg_count, cur[0], cur[1], sub_start[0], sub_start[1]);
+    }
+    if (seg_count == 0) return;
+
+    const inv = matInverse(transform) orelse return;
+    var min_x = std.math.inf(f32);
+    var min_y = std.math.inf(f32);
+    var max_x = -std.math.inf(f32);
+    var max_y = -std.math.inf(f32);
+
+    var i: usize = 0;
+    while (i < seg_count) : (i += 1) {
+        const p0 = matApply(transform, segments[i].ax, segments[i].ay);
+        const p1 = matApply(transform, segments[i].bx, segments[i].by);
+        if (p0[0] < min_x) min_x = p0[0];
+        if (p1[0] < min_x) min_x = p1[0];
+        if (p0[0] > max_x) max_x = p0[0];
+        if (p1[0] > max_x) max_x = p1[0];
+        if (p0[1] < min_y) min_y = p0[1];
+        if (p1[1] < min_y) min_y = p1[1];
+        if (p0[1] > max_y) max_y = p0[1];
+        if (p1[1] > max_y) max_y = p1[1];
+    }
+
+    var x0: i32 = @intFromFloat(@floor(min_x));
+    var y0: i32 = @intFromFloat(@floor(min_y));
+    var x1: i32 = @intFromFloat(@ceil(max_x));
+    var y1: i32 = @intFromFloat(@ceil(max_y));
+    if (x1 < 0 or y1 < 0) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= @as(i32, @intCast(ctx.width))) x1 = @as(i32, @intCast(ctx.width)) - 1;
+    if (y1 >= @as(i32, @intCast(ctx.height))) y1 = @as(i32, @intCast(ctx.height)) - 1;
+
+    var y: i32 = y0;
+    while (y <= y1) : (y += 1) {
+        var x: i32 = x0;
+        while (x <= x1) : (x += 1) {
+            const px = @as(f32, @floatFromInt(x)) + 0.5;
+            const py = @as(f32, @floatFromInt(y)) + 0.5;
+            const local = matApply(inv, px, py);
+
+            var winding: i32 = 0;
+            var j: usize = 0;
+            while (j < seg_count) : (j += 1) {
+                const ax = segments[j].ax;
+                const ay = segments[j].ay;
+                const bx = segments[j].bx;
+                const by = segments[j].by;
+                if (ay <= local[1]) {
+                    if (by > local[1] and pointLeftOfSegment(local[0], local[1], ax, ay, bx, by) > 0) {
+                        winding += 1;
+                    }
+                } else {
+                    if (by <= local[1] and pointLeftOfSegment(local[0], local[1], ax, ay, bx, by) < 0) {
+                        winding -= 1;
+                    }
+                }
+            }
+            if (winding != 0) {
+                setPixel(ctx, x, y, color);
+            }
+        }
+    }
+}
+
 fn drawPathStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width: f32, d: []const u8) void {
     if (color.a == 0) return;
     if (stroke_width <= 0) return;
@@ -1155,6 +1495,7 @@ fn parseElements(ctx: *ParserCtx, idx: *usize, transform: Mat, fill: Color, stro
             }
         } else if (strEq(name, "path")) {
             if (path_d) |d| {
+                drawPathFill(ctx, final_transform, final_fill, d);
                 drawPathStroke(ctx, final_transform, final_stroke, final_stroke_width, d);
             }
         }
@@ -1222,10 +1563,19 @@ export fn run(input_size: u32) u32 {
     const header_size: u32 = 54;
     const needed: u64 = @as(u64, header_size) + pixel_bytes;
     if (needed > OUTPUT_CAP) return 0;
+    const needed_usize: usize = @intCast(needed);
 
     var i: usize = 0;
-    while (i < needed) : (i += 1) {
+    while (i < header_size) : (i += 1) {
         output_buf[i] = 0;
+    }
+    const bg = colorFromRgba(background_color_rgba);
+    var off: usize = header_size;
+    while (off < needed_usize) : (off += 4) {
+        output_buf[off] = bg.b;
+        output_buf[off + 1] = bg.g;
+        output_buf[off + 2] = bg.r;
+        output_buf[off + 3] = bg.a;
     }
 
     // BMP header (BITMAPFILEHEADER + BITMAPINFOHEADER).
@@ -1262,6 +1612,16 @@ export fn run(input_size: u32) u32 {
 }
 
 pub fn renderForTest(input: []const u8) []const u8 {
+    const size: usize = if (input.len > INPUT_CAP) INPUT_CAP else input.len;
+    @memcpy(input_buf[0..size], input[0..size]);
+    const out_len = run(@as(u32, @intCast(size)));
+    return output_buf[0..@as(usize, @intCast(out_len))];
+}
+
+pub fn renderForTestWithBackground(input: []const u8, bg_rgba: u32) []const u8 {
+    const prev = background_color_rgba;
+    background_color_rgba = bg_rgba;
+    defer background_color_rgba = prev;
     const size: usize = if (input.len > INPUT_CAP) INPUT_CAP else input.len;
     @memcpy(input_buf[0..size], input[0..size]);
     const out_len = run(@as(u32, @intCast(size)));
@@ -1382,4 +1742,66 @@ test "svg-rasterize path and line stroke support" {
     try std.testing.expectEqual(@as(u8, 0x77), mouth.g);
     try std.testing.expectEqual(@as(u8, 0xFF), mouth.r);
     try std.testing.expectEqual(@as(u8, 0xFF), mouth.a);
+}
+
+test "svg-rasterize path fill support" {
+    const input =
+        "<svg width=\"10\" height=\"10\">\n" ++
+        "  <path d=\"M 1 1 L 8 1 L 8 8 L 1 8 Z\" fill=\"#00ff00\" stroke=\"none\"/>\n" ++
+        "</svg>";
+
+    const output = renderForTestWithBackground(input, 0xffffffff);
+    const width: u32 = 10;
+    const height: u32 = 10;
+
+    const inside = pixelAt(output, width, height, 4, 4);
+    try std.testing.expectEqual(@as(u8, 0x00), inside.r);
+    try std.testing.expectEqual(@as(u8, 0xFF), inside.g);
+    try std.testing.expectEqual(@as(u8, 0x00), inside.b);
+    try std.testing.expectEqual(@as(u8, 0xFF), inside.a);
+
+    const outside = pixelAt(output, width, height, 0, 0);
+    try std.testing.expectEqual(@as(u8, 0xFF), outside.r);
+    try std.testing.expectEqual(@as(u8, 0xFF), outside.g);
+    try std.testing.expectEqual(@as(u8, 0xFF), outside.b);
+    try std.testing.expectEqual(@as(u8, 0xFF), outside.a);
+}
+
+test "svg-rasterize background color uniform" {
+    const input =
+        "<svg width=\"4\" height=\"4\">\n" ++
+        "  <rect x=\"1\" y=\"1\" width=\"2\" height=\"2\" fill=\"#ff0000\"/>\n" ++
+        "</svg>";
+
+    const output = renderForTestWithBackground(input, 0x11223344);
+    const width: u32 = 4;
+    const height: u32 = 4;
+
+    const bg = pixelAt(output, width, height, 0, 0);
+    try std.testing.expectEqual(@as(u8, 0x11), bg.r);
+    try std.testing.expectEqual(@as(u8, 0x22), bg.g);
+    try std.testing.expectEqual(@as(u8, 0x33), bg.b);
+    try std.testing.expectEqual(@as(u8, 0x44), bg.a);
+
+    const red = pixelAt(output, width, height, 2, 2);
+    try std.testing.expectEqual(@as(u8, 0xFF), red.r);
+    try std.testing.expectEqual(@as(u8, 0x00), red.g);
+    try std.testing.expectEqual(@as(u8, 0x00), red.b);
+    try std.testing.expectEqual(@as(u8, 0xFF), red.a);
+}
+
+test "svg-rasterize named stroke color support" {
+    const input =
+        "<svg width=\"10\" height=\"10\">\n" ++
+        "  <path d=\"M 1 5 L 8 5\" stroke=\"black\" stroke-width=\"2\"/>\n" ++
+        "</svg>";
+
+    const output = renderForTestWithBackground(input, 0xffffffff);
+    const width: u32 = 10;
+    const height: u32 = 10;
+    const px = pixelAt(output, width, height, 4, 5);
+    try std.testing.expectEqual(@as(u8, 0x00), px.r);
+    try std.testing.expectEqual(@as(u8, 0x00), px.g);
+    try std.testing.expectEqual(@as(u8, 0x00), px.b);
+    try std.testing.expectEqual(@as(u8, 0xFF), px.a);
 }
