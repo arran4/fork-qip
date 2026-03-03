@@ -68,10 +68,10 @@ echo "Run :rocket: WebAssembly pipelines identically on any computer :sparkles:"
 curl -s https://news.ycombinator.com | qip run modules/text/html/html-link-extractor.wasm | grep "^https:"
 
 # Render .svg to .ico
-qip run -i qip-logo.svg modules/image/svg+xml/svg-rasterize.wasm modules/bytes/bmp-double.wasm modules/bytes/bmp-to-ico.wasm > qip-logo.ico
+qip run -i qip-logo.svg modules/image/svg+xml/svg-rasterize.wasm modules/image/bmp/bmp-double.wasm modules/image/bmp/bmp-to-ico.wasm > qip-logo.ico
 
 # Render Switzerland flag svg to .ico
-echo '<svg width="32" height="32"><rect width="32" height="32" fill="#d52b1e" /><rect x="13" y="6" width="6" height="20" fill="#ffffff" /><rect x="6" y="13" width="20" height="6" fill="#ffffff" /></svg>' | qip run modules/image/svg+xml/svg-rasterize.wasm modules/bytes/bmp-to-ico.wasm > switzerland-flag.ico
+echo '<svg width="32" height="32"><rect width="32" height="32" fill="#d52b1e" /><rect x="13" y="6" width="6" height="20" fill="#ffffff" /><rect x="6" y="13" width="20" height="6" fill="#ffffff" /></svg>' | qip run modules/image/svg+xml/svg-rasterize.wasm modules/image/bmp/bmp-to-ico.wasm > switzerland-flag.ico
 
 # Test execution timeout safeguards with a module that never returns
 echo "x" | qip run modules/utf8/infinite-loop.wasm

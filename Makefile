@@ -44,10 +44,10 @@ modules/bytes/sqlite-table-names.wasm: modules/bytes/sqlite-table-names.c
 modules/utf8/text-to-bmp.wasm: modules/utf8/text-to-bmp.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=uniform_set_leading -Wl,--export=uniform_set_cols -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
 
-modules/bytes/bmp-double.wasm: modules/bytes/bmp-double.c
+modules/image/bmp/bmp-double.wasm: modules/image/bmp/bmp-double.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_bytes_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
 
-modules/bytes/bmp-double-simd.wasm: modules/bytes/bmp-double-simd.zig
+modules/image/bmp/bmp-double-simd.wasm: modules/image/bmp/bmp-double-simd.zig
 	$(ZIG_ENV) zig build-exe $< $(ZIG_WASM_FLAGS) -mcpu=generic+simd128 -femit-bin=$@
 
 modules/text/javascript/js-to-bmp.wasm: modules/text/javascript/js-to-bmp.c
@@ -97,7 +97,7 @@ test-snapshot: qip modules
 	@printf %s "hello" | $(QIP_BIN) run modules/bytes/base64-encode.wasm modules/utf8/base64-decode.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: bmp-to-ico.wasm | base64-encode.wasm" >> test/latest.txt
-	@printf %s "424D3A0000000000000036000000280000000100000001000000010018000000000004000000000000000000000000000000000000000000FF00" | xxd -r -p | $(QIP_BIN) run modules/bytes/bmp-to-ico.wasm modules/bytes/base64-encode.wasm >> test/latest.txt
+	@printf %s "424D3A0000000000000036000000280000000100000001000000010018000000000004000000000000000000000000000000000000000000FF00" | xxd -r -p | $(QIP_BIN) run modules/image/bmp/bmp-to-ico.wasm modules/bytes/base64-encode.wasm >> test/latest.txt
 	@printf "\n" >> test/latest.txt
 	@printf "%s\n" "module: crc.wasm" >> test/latest.txt
 	@printf %s "abc" | $(QIP_BIN) run modules/bytes/crc.wasm >> test/latest.txt
@@ -171,7 +171,7 @@ test-go:
 	go test $(GO_TEST_PKGS)
 
 site/favicon.ico: qip-logo.svg
-	$(QIP_BIN) run -i qip-logo.svg -- modules/image/svg+xml/svg-rasterize.wasm modules/bytes/bmp-double.wasm modules/bytes/bmp-double.wasm modules/bytes/bmp-to-ico.wasm > $@
+	$(QIP_BIN) run -i qip-logo.svg -- modules/image/svg+xml/svg-rasterize.wasm modules/image/bmp/bmp-double.wasm modules/image/bmp/bmp-double.wasm modules/image/bmp/bmp-to-ico.wasm > $@
 
 install:
 	go install github.com/royalicing/qip@latest

@@ -33,8 +33,6 @@ echo -n "There are eight words here. Try typing more… " | qip run modules/utf8
 #        0       8      47
 ```
 
-TODO: add image processing pipeline.
-
 ---
 
 <form aria-labelledby="form-markdown-heading">
@@ -42,11 +40,13 @@ TODO: add image processing pipeline.
     <qip-preview>
         <source src="/modules/image/svg+xml/svg-recolor-current-color.wasm" type="application/wasm" data-uniform-color_rgba="0xff7722ff" />
         <source src="/modules/image/svg+xml/svg-rasterize.wasm" type="application/wasm" />
-        <source src="/modules/bytes/bmp-to-ico.wasm" type="application/wasm" />
-        <textarea name="input" rows="9" cols="40">&lt;svg class=&quot;lucide lucide-cog&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;24&quot; height=&quot;24&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
-  &lt;path d=&quot;M11 10.27 7 3.34 m11 13.73-4 6.93 M12 22v-2 M12 2v2 M14 12h8 m17 20.66-1-1.73 m17 3.34-1 1.73 M2 12h2 m20.66 17-1.73-1 m20.66 7-1.73 1 m3.34 17 1.73-1 m3.34 7 1.73 1&quot; /&gt;
-  &lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;2&quot; /&gt;
-  &lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;8&quot; /&gt;
+        <source src="/modules/image/bmp/bmp-to-ico.wasm" type="application/wasm" />
+        <textarea name="input" rows="9" cols="40">&lt;svg class=&quot;lucide lucide-smile&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;24&quot; height=&quot;24&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;
+&gt;
+  &lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;10&quot; /&gt;
+  &lt;path d=&quot;M8 14s1.5 2 4 2 4-2 4-2&quot; /&gt;
+  &lt;line x1=&quot;9&quot; x2=&quot;9.01&quot; y1=&quot;9&quot; y2=&quot;9&quot; /&gt;
+  &lt;line x1=&quot;15&quot; x2=&quot;15.01&quot; y1=&quot;9&quot; y2=&quot;9&quot; /&gt;
 &lt;/svg&gt;</textarea>
         <output name="output" style="zoom: 2; image-rendering: pixelated"></output>
     </qip-preview>
@@ -55,10 +55,10 @@ TODO: add image processing pipeline.
 ### Recolor svg icon as orange and convert to favicon (cli)
 
 ```bash
-curl https://unpkg.com/lucide-static@0.575.0/icons/cog.svg \
+curl https://unpkg.com/lucide-static@0.575.0/icons/smile.svg \
 | qip run modules/image/svg+xml/svg-recolor-current-color.wasm '?color_rgba=0xff7722ff' \
 modules/image/svg+xml/svg-rasterize.wasm \
-modules/bytes/bmp-to-ico.wasm \
+modules/image/bmp/bmp-to-ico.wasm \
 > cog.ico
 ```
 
