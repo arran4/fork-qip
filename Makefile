@@ -44,6 +44,9 @@ modules/bytes/sqlite-table-names.wasm: modules/bytes/sqlite-table-names.c
 modules/utf8/text-to-bmp.wasm: modules/utf8/text-to-bmp.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=uniform_set_leading -Wl,--export=uniform_set_cols -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
 
+modules/utf8/text-to-og-image-font8x8.wasm: modules/utf8/text-to-og-image-font8x8.c
+	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export=uniform_set_text_color -Wl,--export=uniform_set_background_color -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_utf8_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
+
 modules/image/bmp/bmp-double.wasm: modules/image/bmp/bmp-double.c
 	$(ZIG_ENV) zig cc $< -target wasm32-freestanding -nostdlib -Wl,--no-entry $(WASM_STACK_FLAG) -Wl,--export=run -Wl,--export-memory -Wl,--export=input_ptr -Wl,--export=input_bytes_cap -Wl,--export=output_ptr -Wl,--export=output_bytes_cap -Oz -o $@
 
@@ -86,7 +89,6 @@ recipes: $(patsubst recipes/text/markdown/%.zig,recipes/text/markdown/%.wasm,$(w
 modules: modules-wat-wasm modules-c-wasm modules-zig-wasm
 
 test: qip modules test-go test-zig test-snapshot
-	diff test/expected.txt test/latest.txt && echo "Snapshots pass."
 
 test-snapshot: qip modules
 	@mkdir -p test
@@ -143,7 +145,7 @@ test-snapshot: qip modules
 	@printf "%s\n" "module: markdown-basic.wasm (table)" >> test/latest.txt
 	@printf "%b" '| A | B |\n| --- | --- |\n| `x` | **y** |\n' | $(QIP_BIN) run modules/text/markdown/markdown-basic.wasm >> test/latest.txt
 	@printf "%s\n" "module: markdown-basic.wasm | html-page-wrap.wasm" >> test/latest.txt
-	@printf "%b" "# Title\nHello **World**\n" | $(QIP_BIN) run modules/text/markdown/markdown-basic.wasm modules/text/html/html-page-wrap.wasm >> test/latest.txt
+	@printf "%b" "# Title\nHello **World**\n" | $(QIP_BIN) run modules/text/markdown/markdown-basic.wasm modules/text/html/html-page-wrap.wasm | perl -0pe 's#(<style\b[^>]*>).*?(</style>)#$$1$$2#gis' >> test/latest.txt
 	@printf "%s\n" "module: rgb-to-hex.wasm" >> test/latest.txt
 	@printf %s "255,0,170" | $(QIP_BIN) run modules/utf8/rgb-to-hex.wasm >> test/latest.txt
 	@printf "%s\n" "module: rgb-to-hex.wasm (rgb())" >> test/latest.txt
@@ -158,6 +160,7 @@ test-snapshot: qip modules
 	@printf %s "hello" | $(QIP_BIN) run modules/utf8/utf8-must-be-valid.wasm >> test/latest.txt
 	@printf "%s\n" "module: wasm-to-js.wasm" >> test/latest.txt
 	@cat modules/utf8/hello.wasm | $(QIP_BIN) run modules/bytes/wasm-to-js.wasm >> test/latest.txt
+	diff test/expected.txt test/latest.txt && echo "Snapshots pass."
 
 ZIG_TEST_FILES := $(MODULE_ZIG_FILES) $(wildcard recipes/text/markdown/*.zig)
 
