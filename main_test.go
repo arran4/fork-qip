@@ -289,6 +289,56 @@ func TestParseUniformInt(t *testing.T) {
 	})
 }
 
+func TestParseUniformHexUint(t *testing.T) {
+	t.Run("parses u32 hex with 0x prefix", func(t *testing.T) {
+		got, isHex, err := parseUniformHexUint("0xff4511ff", 32)
+		if err != nil {
+			t.Fatalf("parseUniformHexUint error: %v", err)
+		}
+		if !isHex {
+			t.Fatal("expected hex prefix detection")
+		}
+		if got != 4282716671 {
+			t.Fatalf("got %d, want 4282716671", got)
+		}
+	})
+
+	t.Run("parses u64 max hex with 0x prefix", func(t *testing.T) {
+		got, isHex, err := parseUniformHexUint("0xffffffffffffffff", 64)
+		if err != nil {
+			t.Fatalf("parseUniformHexUint error: %v", err)
+		}
+		if !isHex {
+			t.Fatal("expected hex prefix detection")
+		}
+		if got != ^uint64(0) {
+			t.Fatalf("got %d, want %d", got, ^uint64(0))
+		}
+	})
+
+	t.Run("ignores non-hex input", func(t *testing.T) {
+		_, isHex, err := parseUniformHexUint("123", 32)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isHex {
+			t.Fatal("expected non-hex input to be ignored")
+		}
+	})
+
+	t.Run("rejects invalid hex", func(t *testing.T) {
+		if _, isHex, err := parseUniformHexUint("0xgg", 32); err == nil || !isHex {
+			t.Fatal("expected parse error with detected hex prefix")
+		}
+	})
+
+	t.Run("rejects u32 overflow", func(t *testing.T) {
+		if _, isHex, err := parseUniformHexUint("0x100000000", 32); err == nil || !isHex {
+			t.Fatal("expected overflow parse error with detected hex prefix")
+		}
+	})
+}
+
 func TestBuildRouteListEntries(t *testing.T) {
 	state := &devRuntimeState{
 		contentRoutes: map[string]qinternal.ContentRoute{

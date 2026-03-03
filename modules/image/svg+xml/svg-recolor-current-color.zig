@@ -45,17 +45,11 @@ export fn output_content_type_size() u32 {
 }
 
 // Uniform accepts packed RGBA as 0xRRGGBBAA.
-// Use i64 to support the full unsigned 32-bit range (0..4294967295).
-export fn uniform_set_color_rgba(value: i64) i64 {
-    if (value < 0) {
-        color_rgba = 0;
-    } else if (value > std.math.maxInt(u32)) {
-        color_rgba = std.math.maxInt(u32);
-    } else {
-        color_rgba = @as(u32, @intCast(value));
-    }
+// Wasm i32 is interpreted as raw bits, so qip can pass full u32 via 0x-prefixed hex.
+export fn uniform_set_color_rgba(value: u32) u32 {
+    color_rgba = value;
     color_css_len = formatColorHex(color_rgba, &color_css_buf);
-    return @as(i64, @intCast(color_rgba));
+    return color_rgba;
 }
 
 fn asciiLower(ch: u8) u8 {

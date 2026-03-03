@@ -1406,6 +1406,18 @@ func parseUniformInt(value string, bitSize int) (int64, error) {
 	return strconv.ParseInt(raw, base, bitSize)
 }
 
+func parseUniformHexUint(value string, bitSize int) (uint64, bool, error) {
+	if len(value) < 2 || value[0] != '0' || (value[1] != 'x' && value[1] != 'X') {
+		return 0, false, nil
+	}
+
+	parsed, err := strconv.ParseUint(value[2:], 16, bitSize)
+	if err != nil {
+		return 0, true, err
+	}
+	return parsed, true, nil
+}
+
 func applyModuleUniforms(ctx context.Context, mod api.Module, uniforms map[string]string) error {
 	if len(uniforms) == 0 {
 		return nil
@@ -1448,12 +1460,28 @@ func applyModuleUniforms(ctx context.Context, mod api.Module, uniforms map[strin
 			}
 			args[0] = api.EncodeF64(parsed)
 		case api.ValueTypeI32:
+			parsedHex, isHex, err := parseUniformHexUint(value, 32)
+			if isHex {
+				if err != nil {
+					return fmt.Errorf("invalid value %q for %s (expected i32)", value, fnName)
+				}
+				args[0] = uint64(uint32(parsedHex))
+				break
+			}
 			parsed, err := parseUniformInt(value, 32)
 			if err != nil {
 				return fmt.Errorf("invalid value %q for %s (expected i32)", value, fnName)
 			}
 			args[0] = uint64(uint32(int32(parsed)))
 		case api.ValueTypeI64:
+			parsedHex, isHex, err := parseUniformHexUint(value, 64)
+			if isHex {
+				if err != nil {
+					return fmt.Errorf("invalid value %q for %s (expected i64)", value, fnName)
+				}
+				args[0] = parsedHex
+				break
+			}
 			parsed, err := parseUniformInt(value, 64)
 			if err != nil {
 				return fmt.Errorf("invalid value %q for %s (expected i64)", value, fnName)

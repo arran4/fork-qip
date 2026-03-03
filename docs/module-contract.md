@@ -50,7 +50,8 @@ Host behavior:
 - Uniforms are applied after module instantiation and before `run(...)` (or before tile execution in image mode).
 - If a query key is provided but the module does not export `uniform_set_<key>`, execution fails.
 - If parsing fails for the expected numeric type, execution fails.
-- Integer uniforms (`i32`, `i64`) parse decimal by default; hexadecimal is accepted only when prefixed with `0x` (or `0X`).
+- Integer uniforms (`i32`, `i64`) parse decimal as signed values by default.
+- For integer uniforms, hexadecimal is accepted only when prefixed with `0x` (or `0X`) and is parsed as an unsigned bit pattern.
 - Uniform keys are applied in sorted key order; do not rely on setter call order for dependent state changes.
 
 CLI syntax:
@@ -69,7 +70,7 @@ qip run modules/utf8/text-to-bmp.wasm '?cols=120'
 # f32 uniforms
 qip image -i in.jpg -o out.png modules/rgba/color-halftone.wasm '?max_radius=2.0&angle_c=0.26'
 
-# i64 uniform for packed 32-bit RGBA passed as hexadecimal (0xRRGGBBAA)
+# packed 32-bit RGBA passed as hexadecimal (0xRRGGBBAA)
 qip run modules/image/svg+xml/svg-recolor-current-color.wasm '?color_rgba=0xff5511ff'
 ```
 
@@ -78,16 +79,10 @@ Zig example:
 ```zig
 var color_rgba: u32 = 0x000000FF;
 
-// Use i64 if you need full 0..4294967295 range from query parsing.
-export fn uniform_set_color_rgba(v: i64) i64 {
-    if (v < 0) {
-        color_rgba = 0;
-    } else if (v > 0xFFFF_FFFF) {
-        color_rgba = 0xFFFF_FFFF;
-    } else {
-        color_rgba = @as(u32, @intCast(v));
-    }
-    return @as(i64, @intCast(color_rgba));
+// For wasm i32 uniforms, qip maps 0x-prefixed values as raw 32-bit bits.
+export fn uniform_set_color_rgba(v: u32) u32 {
+    color_rgba = v;
+    return color_rgba;
 }
 ```
 
