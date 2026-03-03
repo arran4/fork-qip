@@ -57,7 +57,9 @@ Host behavior:
 CLI syntax:
 
 - Put uniform query args immediately after the module path.
+- Quote the full query arg in shells so `&` is not treated as a command separator.
 - `qip run ... module.wasm '?key=value'`
+- `qip run ... module.wasm '?width=900&height=400&font_size=48'`
 - `qip image ... module.wasm '?key=value&other=1.5'`
 - Multiple query args may follow the same module path and are merged.
 

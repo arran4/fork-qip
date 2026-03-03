@@ -188,8 +188,11 @@ You can process images through a chain of rgba shaders. It breaks the work into 
 ```bash
 qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/bw-invert-vignette.png modules/rgba/black-and-white.wasm modules/rgba/invert.wasm modules/rgba/vignette.wasm
 
-# Per-module uniforms via query args (quote '?' in shells like zsh)
+# Per-module uniforms via query args (quote the full query arg; `&` is special in shells)
 qip image -i fixtures/SAAM-2015.54.2_1.jpg -o tmp/halftone.png modules/rgba/color-halftone.wasm '?max_radius=2.0' modules/rgba/brightness.wasm '?brightness=0.2'
+
+# Multiple uniforms for one module in a single query arg
+printf 'Café' | qip run modules/utf8/text-to-path-svg-dejavu-sans-mono.wasm '?width=900&height=400&font_size=48' > out.svg
 ```
 
 ## TODO
