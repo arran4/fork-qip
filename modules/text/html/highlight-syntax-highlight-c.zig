@@ -453,7 +453,7 @@ fn transformHTML(input: []const u8, w: *Writer) void {
         };
 
         const inner = input[open.end + 1 .. close.start];
-        const should_highlight = open.has_language_c and std.mem.indexOfScalar(u8, inner, '<') == null;
+        const should_highlight = open.has_language_c;
         if (!should_highlight) {
             w.writeSlice(input[i .. close.end + 1]);
             cursor = close.end + 1;
