@@ -173,7 +173,7 @@ Build static output from the routed site (no intermediate `.warc` file on disk):
 
 ```bash
 qip route warc ./docs --recipes ./recipes --modules ./modules \
-  | qip run modules/bytes/warc-to-static-tar-no-trailing-slash.wasm \
+  | qip run modules/application/warc/warc-to-static-tar-no-trailing-slash.wasm \
   > site.tar
 
 tar -tf site.tar
