@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,8 +21,19 @@ type RecipeSourceAsset struct {
 }
 
 func CollectRecipeSourceAssets(recipesRoot string) ([]RecipeSourceAsset, error) {
+	return collectViewSourceAssets(recipesRoot, "/view-source/recipes/")
+}
+
+func CollectModuleSourceAssets(modulesRoot string) ([]RecipeSourceAsset, error) {
+	return collectViewSourceAssets(modulesRoot, "/view-source/modules/")
+}
+
+func collectViewSourceAssets(root string, requestPrefix string) ([]RecipeSourceAsset, error) {
 	assets := make([]RecipeSourceAsset, 0, 32)
-	err := filepath.WalkDir(recipesRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
+	if root == "" {
+		return assets, nil
+	}
+	err := filepath.WalkDir(root, func(fullPath string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -36,7 +48,7 @@ func CollectRecipeSourceAssets(recipesRoot string) ([]RecipeSourceAsset, error) 
 			return nil
 		}
 
-		relPath, err := filepath.Rel(recipesRoot, fullPath)
+		relPath, err := filepath.Rel(root, fullPath)
 		if err != nil {
 			return err
 		}
@@ -49,14 +61,14 @@ func CollectRecipeSourceAssets(recipesRoot string) ([]RecipeSourceAsset, error) 
 			return err
 		}
 		assets = append(assets, RecipeSourceAsset{
-			RequestPath: "/view-source/recipes/" + relPath,
+			RequestPath: requestPrefix + relPath,
 			Body:        body,
-			ContentType: detectRecipeSourceContentType(relPath, body),
+			ContentType: detectViewSourceContentType(relPath, body),
 		})
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to enumerate recipe source files: %w", err)
+		return nil, fmt.Errorf("failed to enumerate source files: %w", err)
 	}
 	sort.Slice(assets, func(i, j int) bool {
 		return assets[i].RequestPath < assets[j].RequestPath
@@ -64,14 +76,28 @@ func CollectRecipeSourceAssets(recipesRoot string) ([]RecipeSourceAsset, error) 
 	return assets, nil
 }
 
-func BuildViewSourceIndexHTML(recipeAssets []RecipeSourceAsset, markdownRequestPaths []string) []byte {
+func BuildViewSourceIndexHTML(recipeAssets []RecipeSourceAsset, markdownRequestPaths []string, moduleRequestPaths []string, moduleSourceAssets []RecipeSourceAsset) []byte {
 	markdownRequestPaths = FilterMarkdownRequestPaths(markdownRequestPaths)
+	moduleRequestPaths = filterModuleRequestPaths(moduleRequestPaths)
+	moduleSourceAssets = filterViewSourceAssetsByPrefix(moduleSourceAssets, "/view-source/modules/")
+	moduleEntries := buildModuleViewSourceEntries(moduleRequestPaths, moduleSourceAssets)
 
 	var b strings.Builder
-	b.Grow(768 + len(recipeAssets)*96 + len(markdownRequestPaths)*64)
+	b.Grow(1280 + len(recipeAssets)*96 + len(markdownRequestPaths)*64 + len(moduleEntries)*96)
 	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>/view-source</title><style>")
 	b.WriteString(":root{font-family:system-ui,sans-serif}body{margin:0;padding:1.5rem 1rem;display:flex;justify-content:center}main{width:100%;max-width:44rem;line-height:1.5}h1{margin:0 0 1rem}h2{margin:1.5rem 0 .5rem}ul{padding-left:1.25rem}")
 	b.WriteString("</style></head><body><main><h1>View Source</h1>")
+	b.WriteString("<h2>Content</h2><ul>")
+	for _, requestPath := range markdownRequestPaths {
+		href := requestPathForHref(requestPath)
+		label := requestPath
+		b.WriteString("<li><a href=\"")
+		b.WriteString(html.EscapeString(href))
+		b.WriteString("\">")
+		b.WriteString(html.EscapeString(label))
+		b.WriteString("</a></li>")
+	}
+	b.WriteString("</ul>")
 	b.WriteString("<h2>Recipes</h2><ul>")
 	for _, asset := range recipeAssets {
 		href := requestPathForHref(asset.RequestPath)
@@ -83,18 +109,52 @@ func BuildViewSourceIndexHTML(recipeAssets []RecipeSourceAsset, markdownRequestP
 		b.WriteString("</a></li>")
 	}
 	b.WriteString("</ul>")
-	b.WriteString("<h2>Content</h2><ul>")
-	for _, requestPath := range markdownRequestPaths {
-		href := requestPathForHref(requestPath)
-		label := requestPath
+	b.WriteString("<h2>Modules</h2><ul>")
+	for _, entry := range moduleEntries {
 		b.WriteString("<li><a href=\"")
-		b.WriteString(html.EscapeString(href))
+		b.WriteString(html.EscapeString(entry.href))
 		b.WriteString("\">")
-		b.WriteString(html.EscapeString(label))
+		b.WriteString(html.EscapeString(entry.label))
 		b.WriteString("</a></li>")
 	}
 	b.WriteString("</ul></main></body></html>\n")
 	return []byte(b.String())
+}
+
+type moduleViewSourceEntry struct {
+	label string
+	href  string
+}
+
+func buildModuleViewSourceEntries(moduleRequestPaths []string, moduleSourceAssets []RecipeSourceAsset) []moduleViewSourceEntry {
+	entriesByLabel := make(map[string]moduleViewSourceEntry, len(moduleRequestPaths)+len(moduleSourceAssets))
+	for _, asset := range moduleSourceAssets {
+		label := strings.TrimPrefix(asset.RequestPath, "/view-source/modules/")
+		entriesByLabel[label] = moduleViewSourceEntry{
+			label: label,
+			href:  requestPathForHref(asset.RequestPath),
+		}
+	}
+	// Prefer direct module endpoints for matching labels.
+	for _, requestPath := range moduleRequestPaths {
+		label := strings.TrimPrefix(requestPath, "/modules/")
+		entriesByLabel[label] = moduleViewSourceEntry{
+			label: label,
+			href:  requestPathForHref(requestPath),
+		}
+	}
+
+	labels := make([]string, 0, len(entriesByLabel))
+	for label := range entriesByLabel {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+
+	entries := make([]moduleViewSourceEntry, 0, len(labels))
+	for _, label := range labels {
+		entries = append(entries, entriesByLabel[label])
+	}
+	return entries
 }
 
 func CollectMarkdownRequestPathsFromRoutes(routes map[string]ContentRoute) []string {
@@ -132,7 +192,50 @@ func FilterMarkdownRequestPaths(paths []string) []string {
 	return out
 }
 
-func detectRecipeSourceContentType(relPath string, body []byte) string {
+func filterModuleRequestPaths(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, requestPath := range paths {
+		if !strings.HasPrefix(requestPath, "/modules/") {
+			continue
+		}
+		normalized := path.Clean(requestPath)
+		if normalized == "." || normalized == ".." || strings.HasPrefix(normalized, "../") {
+			continue
+		}
+		if !strings.HasPrefix(normalized, "/") {
+			normalized = "/" + normalized
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func filterViewSourceAssetsByPrefix(assets []RecipeSourceAsset, prefix string) []RecipeSourceAsset {
+	out := make([]RecipeSourceAsset, 0, len(assets))
+	seen := make(map[string]struct{}, len(assets))
+	for _, asset := range assets {
+		if !strings.HasPrefix(asset.RequestPath, prefix) {
+			continue
+		}
+		if _, ok := seen[asset.RequestPath]; ok {
+			continue
+		}
+		seen[asset.RequestPath] = struct{}{}
+		out = append(out, asset)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].RequestPath < out[j].RequestPath
+	})
+	return out
+}
+
+func detectViewSourceContentType(relPath string, body []byte) string {
 	ext := strings.ToLower(filepath.Ext(relPath))
 	// TODO: this should be in a single, central location
 	switch ext {

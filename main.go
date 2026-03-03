@@ -2944,6 +2944,7 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 		return nil, err
 	}
 	recipeSourceAssets := make([]qinternal.RecipeSourceAsset, 0)
+	moduleSourceAssets := make([]qinternal.RecipeSourceAsset, 0)
 	recipeSourceByPath := make(map[string]qinternal.RecipeSourceAsset)
 	recipeSourceIndex := []byte(nil)
 	if opts.viewSource && recipesRoot != "" {
@@ -2952,10 +2953,18 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 			closePipelines(ctx, recipeChains)
 			return nil, err
 		}
+		moduleSourceAssets, err = qinternal.CollectModuleSourceAssets(modulesRoot)
+		if err != nil {
+			closePipelines(ctx, recipeChains)
+			return nil, err
+		}
 		markdownPaths := qinternal.CollectMarkdownRequestPathsFromRoutes(contentRoutes)
-		recipeSourceIndex = qinternal.BuildViewSourceIndexHTML(recipeSourceAssets, markdownPaths)
-		recipeSourceByPath = make(map[string]qinternal.RecipeSourceAsset, len(recipeSourceAssets))
+		recipeSourceIndex = qinternal.BuildViewSourceIndexHTML(recipeSourceAssets, markdownPaths, moduleRequestPaths, moduleSourceAssets)
+		recipeSourceByPath = make(map[string]qinternal.RecipeSourceAsset, len(recipeSourceAssets)+len(moduleSourceAssets))
 		for _, asset := range recipeSourceAssets {
+			recipeSourceByPath[asset.RequestPath] = asset
+		}
+		for _, asset := range moduleSourceAssets {
 			recipeSourceByPath[asset.RequestPath] = asset
 		}
 	}

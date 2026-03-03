@@ -217,9 +217,22 @@ func TestRunRouteWARCViewSourceAddsViewSourceRecords(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(recipesRoot, ".DS_Store"), []byte("noise"), 0o644); err != nil {
 		t.Fatalf("write hidden file: %v", err)
 	}
+	modulesRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(modulesRoot, "utf8"), 0o755); err != nil {
+		t.Fatalf("mkdir modules: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(modulesRoot, "utf8", "trim.zig"), []byte("const std = @import(\"std\");"), 0o644); err != nil {
+		t.Fatalf("write module source zig: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(modulesRoot, "utf8", "styles.css"), []byte(".x{color:red}"), 0o644); err != nil {
+		t.Fatalf("write module source css: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(modulesRoot, ".DS_Store"), []byte("noise"), 0o644); err != nil {
+		t.Fatalf("write hidden module file: %v", err)
+	}
 
 	var out bytes.Buffer
-	err := RunRoute([]string{"warc", "--view-source", "--recipes", recipesRoot, "docs"}, RouteConfig{
+	err := RunRoute([]string{"warc", "--view-source", "--recipes", recipesRoot, "--modules", modulesRoot, "docs"}, RouteConfig{
 		UsageRoute:     "usage route",
 		UsageRouteWarc: "usage route warc",
 		DefaultMode:    "dev",
@@ -228,7 +241,7 @@ func TestRunRouteWARCViewSourceAddsViewSourceRecords(t *testing.T) {
 			if !request.ViewSource {
 				t.Fatalf("expected ViewSource to be true")
 			}
-			return []string{"/a", "/guide", "/guide.md"}, nil
+			return []string{"/a", "/guide", "/guide.md", "/modules/utf8/trim.wasm"}, nil
 		},
 		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
 			return qinternal.InProcessHTTPResponse{
@@ -243,8 +256,8 @@ func TestRunRouteWARCViewSourceAddsViewSourceRecords(t *testing.T) {
 	}
 
 	got := out.String()
-	if gotCount := strings.Count(got, "WARC/1.0\r\n"); gotCount != 6 {
-		t.Fatalf("record count=%d, want 6", gotCount)
+	if gotCount := strings.Count(got, "WARC/1.0\r\n"); gotCount != 9 {
+		t.Fatalf("record count=%d, want 9", gotCount)
 	}
 	if !strings.Contains(got, "WARC-Target-URI: http://qip.local/view-source\r\n") {
 		t.Fatalf("missing view-source index record")
@@ -264,17 +277,44 @@ func TestRunRouteWARCViewSourceAddsViewSourceRecords(t *testing.T) {
 	if !strings.Contains(got, "<h2>Content</h2>") {
 		t.Fatalf("missing content heading in view-source index")
 	}
+	if !strings.Contains(got, "<h2>Modules</h2>") {
+		t.Fatalf("missing modules heading in view-source index")
+	}
+	if gotCount := strings.Count(got, "<h2>Modules</h2>"); gotCount != 1 {
+		t.Fatalf("modules heading count=%d, want 1", gotCount)
+	}
+	if strings.Contains(got, "<h2>Module Sources</h2>") {
+		t.Fatalf("unexpected module sources heading in view-source index")
+	}
 	if !strings.Contains(got, "href=\"/view-source/recipes/text/markdown/10-markdown-basic.zig\"") {
 		t.Fatalf("missing zig link in view-source index")
 	}
 	if !strings.Contains(got, "href=\"/guide.md\"") {
 		t.Fatalf("missing markdown content link in view-source index")
 	}
+	if !strings.Contains(got, "href=\"/modules/utf8/trim.wasm\"") {
+		t.Fatalf("missing module link in view-source index")
+	}
+	if !strings.Contains(got, "href=\"/view-source/modules/utf8/trim.zig\"") {
+		t.Fatalf("missing module zig source link in view-source index")
+	}
+	if !strings.Contains(got, "href=\"/view-source/modules/utf8/styles.css\"") {
+		t.Fatalf("missing module css source link in view-source index")
+	}
+	if !strings.Contains(got, "WARC-Target-URI: http://qip.local/view-source/modules/utf8/trim.zig\r\n") {
+		t.Fatalf("missing module zig source record")
+	}
+	if !strings.Contains(got, "WARC-Target-URI: http://qip.local/view-source/modules/utf8/styles.css\r\n") {
+		t.Fatalf("missing module css source record")
+	}
 	if !strings.Contains(got, "Content-Type: application/wasm\r\n") {
 		t.Fatalf("missing wasm content-type in archived response payload")
 	}
 	if strings.Contains(got, "/view-source/recipes/.DS_Store") {
 		t.Fatalf("hidden files should not be included in view-source output")
+	}
+	if strings.Contains(got, "/view-source/modules/.DS_Store") {
+		t.Fatalf("hidden module source files should not be included in view-source output")
 	}
 }
 

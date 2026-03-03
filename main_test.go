@@ -455,6 +455,11 @@ func TestResolveRecipeSourceResponse(t *testing.T) {
 				Body:        []byte("const x = 1;"),
 				ContentType: "text/plain; charset=utf-8",
 			},
+			"/view-source/modules/utf8/trim.zig": {
+				RequestPath: "/view-source/modules/utf8/trim.zig",
+				Body:        []byte("const std = @import(\"std\");"),
+				ContentType: "text/plain; charset=utf-8",
+			},
 		},
 		recipeSourceIndex: []byte("<!doctype html><h1>/view-source</h1><h2>Recipes</h2><h2>Content</h2>"),
 	}
@@ -486,6 +491,17 @@ func TestResolveRecipeSourceResponse(t *testing.T) {
 
 	if _, ok := resolveRecipeSourceResponse("/view-source/recipes/missing.zig", state); ok {
 		t.Fatal("expected missing asset to not resolve")
+	}
+
+	moduleAssetResp, ok := resolveRecipeSourceResponse("/view-source/modules/utf8/trim.zig", state)
+	if !ok {
+		t.Fatal("expected module source asset response")
+	}
+	if got := moduleAssetResp.Header.Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("module asset content-type=%q, want %q", got, "text/plain; charset=utf-8")
+	}
+	if string(moduleAssetResp.Body) != "const std = @import(\"std\");" {
+		t.Fatalf("module asset body=%q", string(moduleAssetResp.Body))
 	}
 }
 

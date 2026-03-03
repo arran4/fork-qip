@@ -155,7 +155,8 @@ func runRouteWARC(args []string, config RouteConfig) error {
 
 	if viewSource {
 		markdownPaths := qinternal.FilterMarkdownRequestPaths(paths)
-		sourceRecords, err := buildRecipeSourceWARCRecords(host, recipesRoot, markdownPaths)
+		modulePaths := filterModuleRequestPaths(paths)
+		sourceRecords, err := buildRecipeSourceWARCRecords(host, recipesRoot, modulesRoot, markdownPaths, modulePaths)
 		if err != nil {
 			return err
 		}
@@ -304,24 +305,40 @@ func buildHTTPResponsePayload(response qinternal.InProcessHTTPResponse) []byte {
 	return payload.Bytes()
 }
 
-func buildRecipeSourceWARCRecords(host string, recipesRoot string, markdownRequestPaths []string) ([][]byte, error) {
-	assets, err := qinternal.CollectRecipeSourceAssets(recipesRoot)
+func buildRecipeSourceWARCRecords(host string, recipesRoot string, modulesRoot string, markdownRequestPaths []string, moduleRequestPaths []string) ([][]byte, error) {
+	recipeAssets, err := qinternal.CollectRecipeSourceAssets(recipesRoot)
 	if err != nil {
 		return nil, err
 	}
-	indexBody := qinternal.BuildViewSourceIndexHTML(assets, markdownRequestPaths)
+	moduleSourceAssets, err := qinternal.CollectModuleSourceAssets(modulesRoot)
+	if err != nil {
+		return nil, err
+	}
+	indexBody := qinternal.BuildViewSourceIndexHTML(recipeAssets, markdownRequestPaths, moduleRequestPaths, moduleSourceAssets)
 	indexResponse := qinternal.InProcessHTTPResponse{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
 		Body:       indexBody,
 	}
-	records := make([][]byte, 0, len(assets)+1)
+	records := make([][]byte, 0, len(recipeAssets)+len(moduleSourceAssets)+1)
 	indexRecord, err := buildMinimalWARCResponseRecord("http://"+host+"/view-source", indexResponse)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build WARC record for %q: %w", "/view-source", err)
 	}
 	records = append(records, indexRecord)
-	for _, asset := range assets {
+	for _, asset := range recipeAssets {
+		response := qinternal.InProcessHTTPResponse{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{asset.ContentType}},
+			Body:       asset.Body,
+		}
+		record, err := buildMinimalWARCResponseRecord("http://"+host+asset.RequestPath, response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build WARC record for %q: %w", asset.RequestPath, err)
+		}
+		records = append(records, record)
+	}
+	for _, asset := range moduleSourceAssets {
 		response := qinternal.InProcessHTTPResponse{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{asset.ContentType}},
@@ -334,6 +351,16 @@ func buildRecipeSourceWARCRecords(host string, recipesRoot string, markdownReque
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+func filterModuleRequestPaths(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if strings.HasPrefix(p, "/modules/") {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func newWARCRecordID() (string, error) {
