@@ -83,7 +83,7 @@ static int is_self_closing_tag(const unsigned char *s, uint32_t tag_start, uint3
     return s[p - 1] == '/';
 }
 
-static void update_html_context(const unsigned char *s, uint32_t tag_start, uint32_t tag_end, int *raw_text_mode, int *anchor_depth) {
+static void update_html_context(const unsigned char *s, uint32_t tag_start, uint32_t tag_end, int *raw_text_mode, int *anchor_depth, int *pre_depth) {
     uint32_t p = tag_start + 1;
     while (p < tag_end && is_ws(s[p])) p++;
     if (p >= tag_end) return;
@@ -123,6 +123,15 @@ static void update_html_context(const unsigned char *s, uint32_t tag_start, uint
             if (*anchor_depth > 0) *anchor_depth -= 1;
         } else if (!is_self_closing_tag(s, tag_start, tag_end)) {
             *anchor_depth += 1;
+        }
+        return;
+    }
+
+    if (equals_ci(s + name_start, name_len, "pre")) {
+        if (closing) {
+            if (*pre_depth > 0) *pre_depth -= 1;
+        } else if (!is_self_closing_tag(s, tag_start, tag_end)) {
+            *pre_depth += 1;
         }
     }
 }
@@ -169,6 +178,7 @@ uint32_t run(uint32_t input_size) {
     unsigned char tag_quote = 0;
     int raw_text_mode = 0; /* 0=none, 1=script, 2=style */
     int anchor_depth = 0;
+    int pre_depth = 0;
 
     while (i < input_size) {
         unsigned char c = input_buffer[i];
@@ -184,7 +194,7 @@ uint32_t run(uint32_t input_size) {
                     tag_quote = c;
                 } else if (c == '>') {
                     in_tag = 0;
-                    update_html_context(input_buffer, tag_start, i, &raw_text_mode, &anchor_depth);
+                    update_html_context(input_buffer, tag_start, i, &raw_text_mode, &anchor_depth, &pre_depth);
                 }
             }
             i++;
@@ -200,7 +210,7 @@ uint32_t run(uint32_t input_size) {
             continue;
         }
 
-        if (raw_text_mode == 0 && anchor_depth == 0 && starts_with_https(input_buffer, i, input_size)) {
+        if (raw_text_mode == 0 && anchor_depth == 0 && pre_depth == 0 && starts_with_https(input_buffer, i, input_size)) {
             uint32_t start = i;
             uint32_t j = i + 8;
             while (j < input_size && !is_url_stop(input_buffer[j])) {
