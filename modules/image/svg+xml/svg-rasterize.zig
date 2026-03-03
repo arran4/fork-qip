@@ -76,6 +76,17 @@ const Circle = struct {
     set_r: bool = false,
 };
 
+const Line = struct {
+    x1: f32 = 0,
+    y1: f32 = 0,
+    x2: f32 = 0,
+    y2: f32 = 0,
+    set_x1: bool = false,
+    set_y1: bool = false,
+    set_x2: bool = false,
+    set_y2: bool = false,
+};
+
 const MAX_POINTS: usize = 256;
 
 const ParserCtx = struct {
@@ -141,6 +152,17 @@ fn skipWs(input: []const u8, idx: *usize) void {
     while (idx.* < input.len) {
         const c = input[idx.*];
         if (c == ' ' or c == '\n' or c == '\t' or c == '\r') {
+            idx.* += 1;
+            continue;
+        }
+        break;
+    }
+}
+
+fn skipWsCommas(input: []const u8, idx: *usize) void {
+    while (idx.* < input.len) {
+        const c = input[idx.*];
+        if (c == ' ' or c == '\n' or c == '\t' or c == '\r' or c == ',') {
             idx.* += 1;
             continue;
         }
@@ -235,6 +257,25 @@ fn parseFloat(input: []const u8, idx: *usize) ?f32 {
 fn parseNumber(value: []const u8) ?f32 {
     var i: usize = 0;
     return parseFloat(value, &i);
+}
+
+fn parsePathNumber(input: []const u8, idx: *usize) ?f32 {
+    skipWsCommas(input, idx);
+    if (idx.* >= input.len) return null;
+    const c = input[idx.*];
+    if (!((c >= '0' and c <= '9') or c == '+' or c == '-' or c == '.')) {
+        return null;
+    }
+    return parseFloat(input, idx);
+}
+
+fn isAlpha(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z');
+}
+
+fn toUpperASCII(c: u8) u8 {
+    if (c >= 'a' and c <= 'z') return c - 32;
+    return c;
 }
 
 fn parseTransform(value: []const u8) Mat {
@@ -644,7 +685,276 @@ fn drawPolygonStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width
     }
 }
 
-fn parseAttributes(input: []const u8, idx: *usize, base_fill: Color, base_stroke: Color, base_stroke_width: f32, base_transform: Mat, rect: *Rect, circle: *Circle, xs: *[MAX_POINTS]f32, ys: *[MAX_POINTS]f32, poly_count: *usize, attr_fill: *Color, fill_set: *bool, attr_stroke: *Color, stroke_set: *bool, attr_stroke_width: *f32, stroke_width_set: *bool, attr_transform: *Mat, transform_set: *bool, self_closing: *bool) void {
+fn drawSegmentStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width: f32, ax: f32, ay: f32, bx: f32, by: f32) void {
+    if (color.a == 0) return;
+    if (stroke_width <= 0) return;
+    const inv = matInverse(transform) orelse return;
+    const half_w = stroke_width * 0.5;
+    const half_w2 = half_w * half_w;
+    const p0 = matApply(transform, ax, ay);
+    const p1 = matApply(transform, bx, by);
+    var min_x = if (p0[0] < p1[0]) p0[0] else p1[0];
+    var max_x = if (p0[0] > p1[0]) p0[0] else p1[0];
+    var min_y = if (p0[1] < p1[1]) p0[1] else p1[1];
+    var max_y = if (p0[1] > p1[1]) p0[1] else p1[1];
+    const pad = half_w * matMaxScale(transform) + 1.0;
+    min_x -= pad;
+    min_y -= pad;
+    max_x += pad;
+    max_y += pad;
+
+    var x0: i32 = @intFromFloat(@floor(min_x));
+    var y0: i32 = @intFromFloat(@floor(min_y));
+    var x1: i32 = @intFromFloat(@ceil(max_x));
+    var y1: i32 = @intFromFloat(@ceil(max_y));
+    if (x1 < 0 or y1 < 0) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= @as(i32, @intCast(ctx.width))) x1 = @as(i32, @intCast(ctx.width)) - 1;
+    if (y1 >= @as(i32, @intCast(ctx.height))) y1 = @as(i32, @intCast(ctx.height)) - 1;
+
+    var y: i32 = y0;
+    while (y <= y1) : (y += 1) {
+        var x: i32 = x0;
+        while (x <= x1) : (x += 1) {
+            const px = @as(f32, @floatFromInt(x)) + 0.5;
+            const py = @as(f32, @floatFromInt(y)) + 0.5;
+            const local = matApply(inv, px, py);
+            const d2 = pointSegmentDistSq(local[0], local[1], ax, ay, bx, by);
+            if (d2 <= half_w2) {
+                setPixel(ctx, x, y, color);
+            }
+        }
+    }
+}
+
+fn drawPolylineStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width: f32, xs: *const [MAX_POINTS]f32, ys: *const [MAX_POINTS]f32, count: usize, closed: bool) void {
+    if (count < 2) return;
+    var i: usize = 1;
+    while (i < count) : (i += 1) {
+        drawSegmentStroke(ctx, transform, color, stroke_width, xs[i - 1], ys[i - 1], xs[i], ys[i]);
+    }
+    if (closed and count >= 3) {
+        drawSegmentStroke(ctx, transform, color, stroke_width, xs[count - 1], ys[count - 1], xs[0], ys[0]);
+    }
+}
+
+fn cubicPoint(t: f32, p0: [2]f32, p1: [2]f32, p2: [2]f32, p3: [2]f32) [2]f32 {
+    const u = 1.0 - t;
+    const uu = u * u;
+    const uuu = uu * u;
+    const tt = t * t;
+    const ttt = tt * t;
+    return .{
+        uuu * p0[0] + 3.0 * uu * t * p1[0] + 3.0 * u * tt * p2[0] + ttt * p3[0],
+        uuu * p0[1] + 3.0 * uu * t * p1[1] + 3.0 * u * tt * p2[1] + ttt * p3[1],
+    };
+}
+
+fn quadPoint(t: f32, p0: [2]f32, p1: [2]f32, p2: [2]f32) [2]f32 {
+    const u = 1.0 - t;
+    const uu = u * u;
+    const tt = t * t;
+    return .{
+        uu * p0[0] + 2.0 * u * t * p1[0] + tt * p2[0],
+        uu * p0[1] + 2.0 * u * t * p1[1] + tt * p2[1],
+    };
+}
+
+fn drawCubicStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width: f32, p0: [2]f32, p1: [2]f32, p2: [2]f32, p3: [2]f32) void {
+    const steps: usize = 20;
+    var prev = p0;
+    var i: usize = 1;
+    while (i <= steps) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(steps));
+        const pt = cubicPoint(t, p0, p1, p2, p3);
+        drawSegmentStroke(ctx, transform, color, stroke_width, prev[0], prev[1], pt[0], pt[1]);
+        prev = pt;
+    }
+}
+
+fn drawQuadStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width: f32, p0: [2]f32, p1: [2]f32, p2: [2]f32) void {
+    const steps: usize = 14;
+    var prev = p0;
+    var i: usize = 1;
+    while (i <= steps) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(steps));
+        const pt = quadPoint(t, p0, p1, p2);
+        drawSegmentStroke(ctx, transform, color, stroke_width, prev[0], prev[1], pt[0], pt[1]);
+        prev = pt;
+    }
+}
+
+fn drawPathStroke(ctx: *ParserCtx, transform: Mat, color: Color, stroke_width: f32, d: []const u8) void {
+    if (color.a == 0) return;
+    if (stroke_width <= 0) return;
+    var idx: usize = 0;
+    var cmd: u8 = 0;
+    var cur = [2]f32{ 0, 0 };
+    var sub_start = [2]f32{ 0, 0 };
+    var prev_cubic_ctrl = [2]f32{ 0, 0 };
+    var prev_quad_ctrl = [2]f32{ 0, 0 };
+    var has_prev_cubic = false;
+    var has_prev_quad = false;
+
+    while (idx < d.len) {
+        skipWsCommas(d, &idx);
+        if (idx >= d.len) break;
+
+        if (isAlpha(d[idx])) {
+            cmd = d[idx];
+            idx += 1;
+        } else if (cmd == 0) {
+            break;
+        }
+
+        const cmd_upper = toUpperASCII(cmd);
+        const rel = cmd >= 'a' and cmd <= 'z';
+
+        switch (cmd_upper) {
+            'M' => {
+                const x = parsePathNumber(d, &idx) orelse break;
+                const y = parsePathNumber(d, &idx) orelse break;
+                cur = if (rel) .{ cur[0] + x, cur[1] + y } else .{ x, y };
+                sub_start = cur;
+                has_prev_cubic = false;
+                has_prev_quad = false;
+
+                while (true) {
+                    const lx = parsePathNumber(d, &idx) orelse break;
+                    const ly = parsePathNumber(d, &idx) orelse break;
+                    const next = if (rel) .{ cur[0] + lx, cur[1] + ly } else .{ lx, ly };
+                    drawSegmentStroke(ctx, transform, color, stroke_width, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                }
+            },
+            'L' => {
+                while (true) {
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const next = if (rel) .{ cur[0] + x, cur[1] + y } else .{ x, y };
+                    drawSegmentStroke(ctx, transform, color, stroke_width, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    has_prev_cubic = false;
+                    has_prev_quad = false;
+                }
+            },
+            'H' => {
+                while (true) {
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const nx = if (rel) cur[0] + x else x;
+                    const next = [2]f32{ nx, cur[1] };
+                    drawSegmentStroke(ctx, transform, color, stroke_width, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    has_prev_cubic = false;
+                    has_prev_quad = false;
+                }
+            },
+            'V' => {
+                while (true) {
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const ny = if (rel) cur[1] + y else y;
+                    const next = [2]f32{ cur[0], ny };
+                    drawSegmentStroke(ctx, transform, color, stroke_width, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    has_prev_cubic = false;
+                    has_prev_quad = false;
+                }
+            },
+            'C' => {
+                while (true) {
+                    const x1 = parsePathNumber(d, &idx) orelse break;
+                    const y1 = parsePathNumber(d, &idx) orelse break;
+                    const x2 = parsePathNumber(d, &idx) orelse break;
+                    const y2 = parsePathNumber(d, &idx) orelse break;
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const c1 = if (rel) [2]f32{ cur[0] + x1, cur[1] + y1 } else [2]f32{ x1, y1 };
+                    const c2 = if (rel) [2]f32{ cur[0] + x2, cur[1] + y2 } else [2]f32{ x2, y2 };
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawCubicStroke(ctx, transform, color, stroke_width, cur, c1, c2, next);
+                    cur = next;
+                    prev_cubic_ctrl = c2;
+                    has_prev_cubic = true;
+                    has_prev_quad = false;
+                }
+            },
+            'S' => {
+                while (true) {
+                    const x2 = parsePathNumber(d, &idx) orelse break;
+                    const y2 = parsePathNumber(d, &idx) orelse break;
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const c1 = if (has_prev_cubic) [2]f32{ 2.0 * cur[0] - prev_cubic_ctrl[0], 2.0 * cur[1] - prev_cubic_ctrl[1] } else cur;
+                    const c2 = if (rel) [2]f32{ cur[0] + x2, cur[1] + y2 } else [2]f32{ x2, y2 };
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawCubicStroke(ctx, transform, color, stroke_width, cur, c1, c2, next);
+                    cur = next;
+                    prev_cubic_ctrl = c2;
+                    has_prev_cubic = true;
+                    has_prev_quad = false;
+                }
+            },
+            'Q' => {
+                while (true) {
+                    const x1 = parsePathNumber(d, &idx) orelse break;
+                    const y1 = parsePathNumber(d, &idx) orelse break;
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const c = if (rel) [2]f32{ cur[0] + x1, cur[1] + y1 } else [2]f32{ x1, y1 };
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawQuadStroke(ctx, transform, color, stroke_width, cur, c, next);
+                    cur = next;
+                    prev_quad_ctrl = c;
+                    has_prev_quad = true;
+                    has_prev_cubic = false;
+                }
+            },
+            'T' => {
+                while (true) {
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const c = if (has_prev_quad) [2]f32{ 2.0 * cur[0] - prev_quad_ctrl[0], 2.0 * cur[1] - prev_quad_ctrl[1] } else cur;
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawQuadStroke(ctx, transform, color, stroke_width, cur, c, next);
+                    cur = next;
+                    prev_quad_ctrl = c;
+                    has_prev_quad = true;
+                    has_prev_cubic = false;
+                }
+            },
+            'A' => {
+                // Arc support fallback: connect start->end so icons still render basic geometry.
+                while (true) {
+                    _ = parsePathNumber(d, &idx) orelse break; // rx
+                    _ = parsePathNumber(d, &idx) orelse break; // ry
+                    _ = parsePathNumber(d, &idx) orelse break; // x-axis-rotation
+                    _ = parsePathNumber(d, &idx) orelse break; // large-arc-flag
+                    _ = parsePathNumber(d, &idx) orelse break; // sweep-flag
+                    const x = parsePathNumber(d, &idx) orelse break;
+                    const y = parsePathNumber(d, &idx) orelse break;
+                    const next = if (rel) [2]f32{ cur[0] + x, cur[1] + y } else [2]f32{ x, y };
+                    drawSegmentStroke(ctx, transform, color, stroke_width, cur[0], cur[1], next[0], next[1]);
+                    cur = next;
+                    has_prev_cubic = false;
+                    has_prev_quad = false;
+                }
+            },
+            'Z' => {
+                drawSegmentStroke(ctx, transform, color, stroke_width, cur[0], cur[1], sub_start[0], sub_start[1]);
+                cur = sub_start;
+                has_prev_cubic = false;
+                has_prev_quad = false;
+            },
+            else => {
+                // Unknown command: stop path parsing.
+                break;
+            },
+        }
+    }
+}
+
+fn parseAttributes(input: []const u8, idx: *usize, base_fill: Color, base_stroke: Color, base_stroke_width: f32, base_transform: Mat, rect: *Rect, circle: *Circle, line: *Line, xs: *[MAX_POINTS]f32, ys: *[MAX_POINTS]f32, poly_count: *usize, path_d: *?[]const u8, attr_fill: *Color, fill_set: *bool, attr_stroke: *Color, stroke_set: *bool, attr_stroke_width: *f32, stroke_width_set: *bool, attr_transform: *Mat, transform_set: *bool, self_closing: *bool) void {
     while (idx.* < input.len) {
         skipWs(input, idx);
         if (idx.* >= input.len) return;
@@ -722,6 +1032,28 @@ fn parseAttributes(input: []const u8, idx: *usize, base_fill: Color, base_stroke
             }
         } else if (strEq(name, "points")) {
             parsePoints(value, xs, ys, poly_count);
+        } else if (strEq(name, "x1")) {
+            if (parseNumber(value)) |v| {
+                line.x1 = v;
+                line.set_x1 = true;
+            }
+        } else if (strEq(name, "y1")) {
+            if (parseNumber(value)) |v| {
+                line.y1 = v;
+                line.set_y1 = true;
+            }
+        } else if (strEq(name, "x2")) {
+            if (parseNumber(value)) |v| {
+                line.x2 = v;
+                line.set_x2 = true;
+            }
+        } else if (strEq(name, "y2")) {
+            if (parseNumber(value)) |v| {
+                line.y2 = v;
+                line.set_y2 = true;
+            }
+        } else if (strEq(name, "d")) {
+            path_d.* = value;
         }
     }
     _ = base_fill;
@@ -780,9 +1112,11 @@ fn parseElements(ctx: *ParserCtx, idx: *usize, transform: Mat, fill: Color, stro
         const name = readName(input, idx);
         var rect = Rect{};
         var circle = Circle{};
+        var line = Line{};
         var xs: [MAX_POINTS]f32 = undefined;
         var ys: [MAX_POINTS]f32 = undefined;
         var poly_count: usize = 0;
+        var path_d: ?[]const u8 = null;
         var attr_fill = fill;
         var fill_set = false;
         var attr_stroke = stroke;
@@ -793,7 +1127,7 @@ fn parseElements(ctx: *ParserCtx, idx: *usize, transform: Mat, fill: Color, stro
         var transform_set = false;
         var self_closing = false;
 
-        parseAttributes(input, idx, fill, stroke, stroke_width, transform, &rect, &circle, &xs, &ys, &poly_count, &attr_fill, &fill_set, &attr_stroke, &stroke_set, &attr_stroke_width, &stroke_width_set, &attr_transform, &transform_set, &self_closing);
+        parseAttributes(input, idx, fill, stroke, stroke_width, transform, &rect, &circle, &line, &xs, &ys, &poly_count, &path_d, &attr_fill, &fill_set, &attr_stroke, &stroke_set, &attr_stroke_width, &stroke_width_set, &attr_transform, &transform_set, &self_closing);
 
         const final_transform = if (transform_set) matMul(transform, attr_transform) else transform;
         const final_fill = if (fill_set) attr_fill else fill;
@@ -813,6 +1147,16 @@ fn parseElements(ctx: *ParserCtx, idx: *usize, transform: Mat, fill: Color, stro
         } else if (strEq(name, "polygon")) {
             drawPolygon(ctx, final_transform, final_fill, &xs, &ys, poly_count);
             drawPolygonStroke(ctx, final_transform, final_stroke, final_stroke_width, &xs, &ys, poly_count);
+        } else if (strEq(name, "polyline")) {
+            drawPolylineStroke(ctx, final_transform, final_stroke, final_stroke_width, &xs, &ys, poly_count, false);
+        } else if (strEq(name, "line")) {
+            if (line.set_x1 and line.set_y1 and line.set_x2 and line.set_y2) {
+                drawSegmentStroke(ctx, final_transform, final_stroke, final_stroke_width, line.x1, line.y1, line.x2, line.y2);
+            }
+        } else if (strEq(name, "path")) {
+            if (path_d) |d| {
+                drawPathStroke(ctx, final_transform, final_stroke, final_stroke_width, d);
+            }
         }
     }
 }
@@ -1006,4 +1350,36 @@ test "svg-rasterize stroke support" {
     try std.testing.expectEqual(@as(u8, 0x00), center.g);
     try std.testing.expectEqual(@as(u8, 0x00), center.r);
     try std.testing.expectEqual(@as(u8, 0x00), center.a);
+}
+
+test "svg-rasterize path and line stroke support" {
+    const input =
+        "<svg width=\"24\" height=\"24\" fill=\"none\" stroke=\"#ff7722\" stroke-width=\"2\">\n" ++
+        "  <circle cx=\"12\" cy=\"12\" r=\"10\"/>\n" ++
+        "  <path d=\"M8 14s1.5 2 4 2 4-2 4-2\"/>\n" ++
+        "  <line x1=\"9\" y1=\"9\" x2=\"9.01\" y2=\"9\"/>\n" ++
+        "  <line x1=\"15\" y1=\"9\" x2=\"15.01\" y2=\"9\"/>\n" ++
+        "</svg>";
+
+    const output = renderForTest(input);
+    const width: u32 = 24;
+    const height: u32 = 24;
+
+    const ring = pixelAt(output, width, height, 12, 2);
+    try std.testing.expectEqual(@as(u8, 0x22), ring.b);
+    try std.testing.expectEqual(@as(u8, 0x77), ring.g);
+    try std.testing.expectEqual(@as(u8, 0xFF), ring.r);
+    try std.testing.expectEqual(@as(u8, 0xFF), ring.a);
+
+    const left_eye = pixelAt(output, width, height, 9, 9);
+    try std.testing.expectEqual(@as(u8, 0x22), left_eye.b);
+    try std.testing.expectEqual(@as(u8, 0x77), left_eye.g);
+    try std.testing.expectEqual(@as(u8, 0xFF), left_eye.r);
+    try std.testing.expectEqual(@as(u8, 0xFF), left_eye.a);
+
+    const mouth = pixelAt(output, width, height, 12, 16);
+    try std.testing.expectEqual(@as(u8, 0x22), mouth.b);
+    try std.testing.expectEqual(@as(u8, 0x77), mouth.g);
+    try std.testing.expectEqual(@as(u8, 0xFF), mouth.r);
+    try std.testing.expectEqual(@as(u8, 0xFF), mouth.a);
 }
