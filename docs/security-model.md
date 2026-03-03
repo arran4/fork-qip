@@ -51,7 +51,9 @@ Recommendation:
 
 Current guardrails:
 
-- `run`, `image`, and each `dev` request execute under a `100ms` context timeout.
+- `run` executes under a `5000ms` context timeout by default (configurable via `--timeout-ms`).
+- `image` executes under a `4000ms` context timeout by default (configurable via `--timeout-ms`).
+- Each `dev` request executes under a `100ms` context timeout.
 - Input size is checked against module-advertised input capacity.
 - Output size is checked against module-advertised output capacity when output buffers are exported.
 

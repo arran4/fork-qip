@@ -313,7 +313,7 @@ func runCmd(args []string) {
 	fs.SetOutput(io.Discard)
 	var runVerbose bool
 	var inputPath string
-	timeoutMS := 100
+	timeoutMS := 5000
 	fs.BoolVar(&runVerbose, "v", false, "enable verbose logging")
 	fs.BoolVar(&runVerbose, "verbose", false, "enable verbose logging")
 	fs.StringVar(&inputPath, "i", "", "input file path")
