@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"image"
 	"net/http"
 	"os"
 	"os/exec"
@@ -188,6 +189,47 @@ func TestNormalizeDevArgs(t *testing.T) {
 			t.Fatalf("args=%v, want %v", got, in)
 		}
 	})
+
+	t.Run("trailing flags after content are normalized", func(t *testing.T) {
+		in := []string{"docs/", "--recipes", "recipes/", "--mode", "dev", "-p", "4004"}
+		got := normalizeDevArgs(in)
+		want := []string{"--recipes", "recipes/", "--mode", "dev", "-p", "4004", "docs/"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("args=%v, want %v", got, want)
+		}
+	})
+}
+
+func TestNormalizeRunArgs(t *testing.T) {
+	in := []string{
+		"modules/utf8/trim.wasm",
+		"?x=1",
+		"modules/utf8/wc.wasm",
+		"-o",
+		"out.txt",
+		"--timeout-ms",
+		"2500",
+	}
+	got := normalizeRunArgs(in)
+	want := []string{
+		"-o",
+		"out.txt",
+		"--timeout-ms",
+		"2500",
+		"modules/utf8/trim.wasm",
+		"?x=1",
+		"modules/utf8/wc.wasm",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args=%v, want %v", got, want)
+	}
+
+	inWithDashDash := []string{"module.wasm", "--", "--not-a-flag"}
+	gotWithDashDash := normalizeRunArgs(inWithDashDash)
+	wantWithDashDash := []string{"--", "module.wasm", "--not-a-flag"}
+	if !reflect.DeepEqual(gotWithDashDash, wantWithDashDash) {
+		t.Fatalf("args=%v, want %v", gotWithDashDash, wantWithDashDash)
+	}
 }
 
 func TestNormalizeRouteArgs(t *testing.T) {
@@ -649,6 +691,205 @@ func TestRunAppliesColsUniform(t *testing.T) {
 	}
 	if withUniformH < baseH {
 		t.Fatalf("height unexpectedly decreased: base=%d uniform=%d", baseH, withUniformH)
+	}
+}
+
+func TestRunOutputFlagWritesToFile(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "in.txt")
+	if err := os.WriteFile(inputPath, []byte("  hello  \n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	outputPath := filepath.Join(t.TempDir(), "out.txt")
+
+	cmd := exec.Command(
+		os.Args[0],
+		"-test.run=TestHelperRunModuleCLI",
+		"--",
+		"-i",
+		inputPath,
+		"-o",
+		outputPath,
+		"modules/utf8/trim.wasm",
+	)
+	cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstderr: %s", err, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout should be empty when -o is set, got %q", stdout.String())
+	}
+
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("output file=%q, want %q", string(got), "hello")
+	}
+}
+
+func TestRunOutputFlagAtEndWritesToFile(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "in.txt")
+	if err := os.WriteFile(inputPath, []byte("  hello  \n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	outputPath := filepath.Join(t.TempDir(), "out.txt")
+
+	cmd := exec.Command(
+		os.Args[0],
+		"-test.run=TestHelperRunModuleCLI",
+		"--",
+		"-i",
+		inputPath,
+		"modules/utf8/trim.wasm",
+		"-o",
+		outputPath,
+	)
+	cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstderr: %s", err, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout should be empty when -o is set, got %q", stdout.String())
+	}
+
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("output file=%q, want %q", string(got), "hello")
+	}
+}
+
+func TestRunDoubleDashTreatsFollowingAsPositional(t *testing.T) {
+	cmd := exec.Command(
+		os.Args[0],
+		"-test.run=TestHelperRunModuleCLI",
+		"--",
+		"--",
+		"--not-a-flag",
+	)
+	cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("expected run to fail due to missing module file")
+	}
+	gotErr := stderr.String()
+	if strings.Contains(gotErr, "flag provided but not defined") {
+		t.Fatalf("stderr=%q, expected '--not-a-flag' to be treated as positional", gotErr)
+	}
+	if !strings.Contains(gotErr, "open --not-a-flag") {
+		t.Fatalf("stderr=%q, expected file-open error for positional module path", gotErr)
+	}
+}
+
+func TestRunOutputFlagImageReencodeByExtension(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "in.txt")
+	if err := os.WriteFile(inputPath, []byte("qip"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		fileName string
+		checkSig []byte
+	}{
+		{name: "png", fileName: "out.png", checkSig: []byte{0x89, 'P', 'N', 'G'}},
+		{name: "jpg", fileName: "out.jpg", checkSig: []byte{0xFF, 0xD8}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			outputPath := filepath.Join(t.TempDir(), tc.fileName)
+			cmd := exec.Command(
+				os.Args[0],
+				"-test.run=TestHelperRunModuleCLI",
+				"--",
+				"-i",
+				inputPath,
+				"-o",
+				outputPath,
+				"modules/utf8/text-to-bmp.wasm",
+			)
+			cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("run failed: %v\nstderr: %s", err, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout should be empty when -o is set, got %q", stdout.String())
+			}
+
+			got, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatalf("read output file: %v", err)
+			}
+			if len(got) < len(tc.checkSig) || !bytes.Equal(got[:len(tc.checkSig)], tc.checkSig) {
+				t.Fatalf("unexpected file signature for %s", tc.fileName)
+			}
+			img, _, err := image.Decode(bytes.NewReader(got))
+			if err != nil {
+				t.Fatalf("decode encoded image: %v", err)
+			}
+			if img.Bounds().Dx() <= 0 || img.Bounds().Dy() <= 0 {
+				t.Fatalf("invalid output image bounds: %v", img.Bounds())
+			}
+		})
+	}
+}
+
+func TestRunOutputFlagImageReencodeRejectsNonImageOutput(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "in.txt")
+	if err := os.WriteFile(inputPath, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	outputPath := filepath.Join(t.TempDir(), "out.png")
+
+	cmd := exec.Command(
+		os.Args[0],
+		"-test.run=TestHelperRunModuleCLI",
+		"--",
+		"-i",
+		inputPath,
+		"-o",
+		outputPath,
+		"modules/utf8/trim.wasm",
+	)
+	cmd.Env = append(os.Environ(), "QIP_HELPER_RUN_MODULE_CLI=1")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("expected run to fail for non-image output to .png")
+	}
+	if !strings.Contains(stderr.String(), "cannot encode non-image output as image") {
+		t.Fatalf("stderr=%q, want image conversion error", stderr.String())
+	}
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Fatalf("output file should not be created on error, statErr=%v", statErr)
 	}
 }
 

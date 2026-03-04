@@ -57,7 +57,7 @@ func RunFormCommand(args []string) error {
 	var verbose bool
 	fs.BoolVar(&verbose, "v", false, "enable verbose logging")
 	fs.BoolVar(&verbose, "verbose", false, "enable verbose logging")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeFormArgs(args)); err != nil {
 		return fmt.Errorf("%s %w", usageForm, err)
 	}
 
@@ -94,6 +94,10 @@ func RunFormCommand(args []string) error {
 	}
 
 	return runFormInteractive(ctx, fm, os.Stdin, os.Stdout)
+}
+
+func normalizeFormArgs(args []string) []string {
+	return NormalizeFlagArgs(args, nil)
 }
 
 func readFormModulePath(path string, verbose bool) ([]byte, error) {

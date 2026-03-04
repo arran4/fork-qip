@@ -16,7 +16,7 @@ import (
 	"html"
 	"image"
 	"image/draw"
-	_ "image/jpeg"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"io/fs"
@@ -102,7 +102,7 @@ type options struct {
 }
 
 const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a chain of wasm modules on input\n  bench    Compare one or more wasm modules for output parity and performance\n  image    Run wasm filters on an input image\n  comply   Validate module ABI and run compliance check modules\n  dev      Start a dev server for a content directory with optional recipes\n  route    Resolve routed paths and export route artifacts\n  form     Run an interactive wasm form module in the terminal\n  help     Show command help"
-const usageRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file> [?key=value[&key2=value2...] ...] ..."
+const usageRun = "Usage: qip run [-v] [-i <input>] [-o <output file or ->] [--timeout-ms <ms>] <wasm module URL or file> [?key=value[&key2=value2...] ...] ..."
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value[&key2=value2...] ...] ..."
 const usageComply = "Usage: qip comply <impl.wasm> [--with <compliance.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
@@ -119,7 +119,7 @@ var qipFormTagPattern = regexp.MustCompile(`(?is)<qip-form\b[^>]*>`)
 var qipFormNamePattern = regexp.MustCompile("(?is)\\bname\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))")
 var qipPreviewTagPattern = regexp.MustCompile(`(?is)<qip-preview\b[^>]*>`)
 
-const helpRun = "Usage: qip run [-v] [-i <input>] [--timeout-ms <ms>] <wasm module URL or file> [?key=value[&key2=value2...] ...] ...\n\nModule contracts:\n  Run mode:\n    - Exports run(input_size), input_ptr, and input_utf8_cap or input_bytes_cap\n    - Exports output_ptr and output_utf8_cap or output_bytes_cap or output_i32_cap\n    - Optional uniforms: uniform_set_<key>(value)\n  Image mode:\n    - Exports tile_rgba_f32_64x64, input_ptr, input_bytes_cap\n    - Optional: uniform_set_width_and_height, calculate_halo_px\n\nUniform args:\n  Place a query string immediately after a module path to set that module's uniforms.\n  Quote the full query arg in your shell (for example, to avoid '&' splitting).\n  Example: modules/utf8/text-to-bmp.wasm '?cols=120&leading=24'\n  Example: modules/utf8/text-to-path-svg-dejavu-sans-mono.wasm '?width=900&height=400&font_size=48'\n\nComposition:\n  If a module exports tile_rgba_f32_64x64, qip run composes a contiguous image stage block.\n  Input to that block must be BMP bytes and the block outputs BMP bytes.\n  Run stages may follow and will receive BMP bytes.\n\nExample:\n  echo '<svg width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#d52b1e\" /><rect x=\"13\" y=\"6\" width=\"6\" height=\"20\" fill=\"#ffffff\" /><rect x=\"6\" y=\"13\" width=\"20\" height=\"6\" fill=\"#ffffff\" /></svg>' | ./qip run modules/image/svg+xml/svg-rasterize.wasm modules/image/bmp/bmp-double.wasm modules/image/bmp/bmp-to-ico.wasm > out.ico"
+const helpRun = "Usage: qip run [-v] [-i <input>] [-o <output file or ->] [--timeout-ms <ms>] <wasm module URL or file> [?key=value[&key2=value2...] ...] ...\n\nModule contracts:\n  Run mode:\n    - Exports run(input_size), input_ptr, and input_utf8_cap or input_bytes_cap\n    - Exports output_ptr and output_utf8_cap or output_bytes_cap or output_i32_cap\n    - Optional uniforms: uniform_set_<key>(value)\n  Image mode:\n    - Exports tile_rgba_f32_64x64, input_ptr, input_bytes_cap\n    - Optional: uniform_set_width_and_height, calculate_halo_px\n\nOutput:\n  - Default output is stdout.\n  - Use -o <path> to write to a file.\n  - If -o ends with .png/.jpg/.jpeg/.bmp and pipeline output is an image,\n    qip re-encodes to the requested output image format.\n\nUniform args:\n  Place a query string immediately after a module path to set that module's uniforms.\n  Quote the full query arg in your shell (for example, to avoid '&' splitting).\n  Example: modules/utf8/text-to-bmp.wasm '?cols=120&leading=24'\n  Example: modules/utf8/text-to-path-svg-dejavu-sans-mono.wasm '?width=900&height=400&font_size=48'\n\nComposition:\n  If a module exports tile_rgba_f32_64x64, qip run composes a contiguous image stage block.\n  Input to that block must be BMP bytes and the block outputs BMP bytes.\n  Run stages may follow and will receive BMP bytes.\n\nExample:\n  echo '<svg width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#d52b1e\" /><rect x=\"13\" y=\"6\" width=\"6\" height=\"20\" fill=\"#ffffff\" /><rect x=\"6\" y=\"13\" width=\"20\" height=\"6\" fill=\"#ffffff\" /></svg>' | ./qip run -o out.ico modules/image/svg+xml/svg-rasterize.wasm modules/image/bmp/bmp-double.wasm modules/image/bmp/bmp-to-ico.wasm"
 const helpComply = `Usage: qip comply <impl.wasm> [--with <compliance.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]
 
 What qip comply does:
@@ -313,12 +313,15 @@ func runCmd(args []string) {
 	fs.SetOutput(io.Discard)
 	var runVerbose bool
 	var inputPath string
+	outputPath := "-"
 	timeoutMS := 5000
 	fs.BoolVar(&runVerbose, "v", false, "enable verbose logging")
 	fs.BoolVar(&runVerbose, "verbose", false, "enable verbose logging")
 	fs.StringVar(&inputPath, "i", "", "input file path")
+	fs.StringVar(&outputPath, "o", "-", "output file path ('-' for stdout)")
+	fs.StringVar(&outputPath, "output", "-", "output file path ('-' for stdout)")
 	fs.IntVar(&timeoutMS, "timeout-ms", timeoutMS, "per-run timeout in milliseconds")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeRunArgs(args)); err != nil {
 		gameOver("%s %v", usageRun, err)
 	}
 	opts.verbose = opts.verbose || runVerbose
@@ -395,32 +398,8 @@ func runCmd(args []string) {
 		gameOver("%v", err)
 	}
 
-	if result.Encoding() == qinternal.EncodingRawBytes || result.Encoding() == qinternal.EncodingBMP {
-		if _, err := os.Stdout.Write(outputBytes); err != nil {
-			gameOver("Error writing raw output: %v", err)
-		}
-	} else if result.Encoding() == qinternal.EncodingUTF8 {
-		fmt.Printf("%s\n", outputBytes)
-	} else if result.Encoding() == qinternal.EncodingI32Array {
-		if opts.verbose {
-			fmt.Fprintln(os.Stderr, outputBytes)
-		}
-
-		count := len(outputBytes) / 4
-		if count >= 1 {
-			bufSize := count * 9
-			writer := bufio.NewWriterSize(os.Stdout, bufSize)
-			defer writer.Flush()
-			for i := 0; i < count; i++ {
-				v := binary.LittleEndian.Uint32(outputBytes[i*4:])
-				if opts.verbose {
-					vlogf(opts, "u32: %d", v)
-				}
-				if _, err := fmt.Fprintf(writer, "%08x\n", v); err != nil {
-					gameOver("Error writing i32 output: %v", err)
-				}
-			}
-		}
+	if err := writeRunOutput(result, outputBytes, outputPath, opts); err != nil {
+		gameOver("%v", err)
 	}
 }
 
@@ -482,7 +461,7 @@ func benchCmd(args []string) {
 	fs.StringVar(&benchtimeStr, "benchtime", benchtimeStr, "target measured time per module (e.g. 3s)")
 	fs.IntVar(&timeoutMS, "timeout-ms", timeoutMS, "per-run timeout in milliseconds")
 
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeBenchArgs(args)); err != nil {
 		gameOver("%s %v", usageBench, err)
 	}
 	opts.verbose = benchVerbose
@@ -1637,7 +1616,7 @@ func imageCmd(args []string) {
 	fs.StringVar(&inputImagePath, "i", "", "input image path")
 	fs.StringVar(&outputImagePath, "o", "", "output image path")
 	fs.IntVar(&timeoutMS, "timeout-ms", timeoutMS, "module execution timeout in milliseconds")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeImageArgs(args)); err != nil {
 		gameOver("%s %v", usageImage, err)
 	}
 	opts.verbose = opts.verbose || imageVerbose
@@ -1729,14 +1708,12 @@ func imageCmd(args []string) {
 		gameOver("%v", err)
 	}
 
-	outFile, err := os.Create(outputImagePath)
+	encodedImageBytes, err := encodeImageForOutputPath(finalRGBA, outputImagePath)
 	if err != nil {
-		gameOver("Error creating output image file: %v", err)
+		gameOver("Error encoding output image: %v", err)
 	}
-	defer outFile.Close()
-	encoder := png.Encoder{CompressionLevel: png.NoCompression}
-	if err := encoder.Encode(outFile, finalRGBA); err != nil {
-		gameOver("Error writing output image: %v", err)
+	if err := os.WriteFile(outputImagePath, encodedImageBytes, 0o644); err != nil {
+		gameOver("Error writing output image file: %v", err)
 	}
 }
 
@@ -2985,57 +2962,54 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 	}, nil
 }
 
-func normalizeDevArgs(args []string) []string {
-	if len(args) == 0 {
-		return args
+func normalizeRunArgs(args []string) []string {
+	flagsWithValue := map[string]struct{}{
+		"-i":           {},
+		"-o":           {},
+		"--output":     {},
+		"--timeout-ms": {},
 	}
-	first := args[0]
-	if strings.HasPrefix(first, "-") {
-		return args
-	}
+	return qinternal.NormalizeFlagArgs(args, flagsWithValue)
+}
 
-	normalized := make([]string, 0, len(args))
-	normalized = append(normalized, args[1:]...)
-	normalized = append(normalized, first)
-	return normalized
+func normalizeBenchArgs(args []string) []string {
+	flagsWithValue := map[string]struct{}{
+		"-i":           {},
+		"-r":           {},
+		"--benchtime":  {},
+		"--timeout-ms": {},
+	}
+	return qinternal.NormalizeFlagArgs(args, flagsWithValue)
+}
+
+func normalizeImageArgs(args []string) []string {
+	flagsWithValue := map[string]struct{}{
+		"-i":           {},
+		"-o":           {},
+		"--timeout-ms": {},
+	}
+	return qinternal.NormalizeFlagArgs(args, flagsWithValue)
+}
+
+func normalizeDevArgs(args []string) []string {
+	flagsWithValue := map[string]struct{}{
+		"--recipes": {},
+		"--forms":   {},
+		"--modules": {},
+		"--mode":    {},
+		"-p":        {},
+	}
+	return qinternal.NormalizeFlagArgs(args, flagsWithValue)
 }
 
 func normalizeRouteArgs(args []string) []string {
-	if len(args) == 0 {
-		return args
-	}
-
 	flagsWithValue := map[string]struct{}{
 		"--recipes": {},
 		"--forms":   {},
 		"--modules": {},
 		"--mode":    {},
 	}
-
-	normalized := make([]string, 0, len(args))
-	positionals := make([]string, 0, 2)
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			positionals = append(positionals, args[i+1:]...)
-			break
-		}
-		if strings.HasPrefix(arg, "-") && arg != "-" {
-			normalized = append(normalized, arg)
-			if strings.Contains(arg, "=") {
-				continue
-			}
-			if _, ok := flagsWithValue[arg]; ok && i+1 < len(args) {
-				i++
-				normalized = append(normalized, args[i])
-			}
-			continue
-		}
-		positionals = append(positionals, arg)
-	}
-
-	normalized = append(normalized, positionals...)
-	return normalized
+	return qinternal.NormalizeFlagArgs(args, flagsWithValue)
 }
 
 func parseRuntimeMode(raw string) (runtimeMode, error) {
@@ -3974,6 +3948,170 @@ func formatOutputBytes(output qinternal.Content) ([]byte, error) {
 	default:
 		return nil, errors.New("Unknown output encoding")
 	}
+}
+
+func writeRunOutput(result qinternal.Content, outputBytes []byte, outputPath string, opts options) error {
+	if outputPath == "" {
+		outputPath = "-"
+	}
+	if outputPath == "-" {
+		return writeRunOutputToStdout(result, outputBytes, opts)
+	}
+	return writeRunOutputToFile(result, outputPath)
+}
+
+func writeRunOutputToStdout(result qinternal.Content, outputBytes []byte, opts options) error {
+	if result.Encoding() == qinternal.EncodingRawBytes || result.Encoding() == qinternal.EncodingBMP {
+		if _, err := os.Stdout.Write(outputBytes); err != nil {
+			return fmt.Errorf("error writing raw output: %w", err)
+		}
+		return nil
+	}
+
+	if result.Encoding() == qinternal.EncodingUTF8 {
+		fmt.Printf("%s\n", outputBytes)
+		return nil
+	}
+
+	if result.Encoding() == qinternal.EncodingI32Array {
+		if opts.verbose {
+			fmt.Fprintln(os.Stderr, outputBytes)
+		}
+
+		count := len(outputBytes) / 4
+		if count < 1 {
+			return nil
+		}
+
+		bufSize := count * 9
+		writer := bufio.NewWriterSize(os.Stdout, bufSize)
+		defer writer.Flush()
+
+		for i := 0; i < count; i++ {
+			v := binary.LittleEndian.Uint32(outputBytes[i*4:])
+			if opts.verbose {
+				vlogf(opts, "u32: %d", v)
+			}
+			if _, err := fmt.Fprintf(writer, "%08x\n", v); err != nil {
+				return fmt.Errorf("error writing i32 output: %w", err)
+			}
+		}
+		return nil
+	}
+
+	return fmt.Errorf("unknown output encoding %v", result.Encoding())
+}
+
+func writeRunOutputToFile(result qinternal.Content, outputPath string) error {
+	var data []byte
+
+	if wantsImageReencode(outputPath) {
+		decodedImage, err := decodeRunOutputImage(result)
+		if err != nil {
+			return err
+		}
+		data, err = encodeImageForOutputPath(decodedImage, outputPath)
+		if err != nil {
+			return err
+		}
+	} else {
+		formattedOutput, err := formatOutputBytes(result)
+		if err != nil {
+			return err
+		}
+		data = formattedOutput
+	}
+
+	if err := os.WriteFile(outputPath, data, 0o644); err != nil {
+		return fmt.Errorf("error writing output file: %w", err)
+	}
+	return nil
+}
+
+func wantsImageReencode(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".bmp":
+		return true
+	default:
+		return false
+	}
+}
+
+func decodeRunOutputImage(output qinternal.Content) (image.Image, error) {
+	outputBytes, err := qinternal.AsRawBytes(output)
+	if err != nil {
+		return nil, fmt.Errorf("cannot decode pipeline output as image: %w", err)
+	}
+	if len(outputBytes) == 0 {
+		return nil, errors.New("cannot decode empty pipeline output as image")
+	}
+
+	contentType := normalizeIncomingContentType(qinternal.ContentTypeOf(output))
+
+	if output.Encoding() == qinternal.EncodingBMP || (len(outputBytes) >= 2 && outputBytes[0] == 'B' && outputBytes[1] == 'M') {
+		bmp, decodeErr := decodeBMP(outputBytes)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("could not decode BMP output: %w", decodeErr)
+		}
+		return bmp, nil
+	}
+
+	decodedImage, _, decodeErr := image.Decode(bytes.NewReader(outputBytes))
+	if decodeErr == nil {
+		return decodedImage, nil
+	}
+
+	if strings.HasPrefix(contentType, "image/") {
+		return nil, fmt.Errorf("could not decode output image (%s): %w", contentType, decodeErr)
+	}
+
+	return nil, fmt.Errorf("cannot encode non-image output as image (encoding=%v, content_type=%q)", output.Encoding(), contentType)
+}
+
+func encodeImageForOutputPath(img image.Image, outputPath string) ([]byte, error) {
+	ext := strings.ToLower(filepath.Ext(outputPath))
+	var out bytes.Buffer
+
+	switch ext {
+	case ".png":
+		encoder := png.Encoder{CompressionLevel: png.NoCompression}
+		if err := encoder.Encode(&out, img); err != nil {
+			return nil, err
+		}
+	case ".jpg", ".jpeg":
+		if err := jpeg.Encode(&out, img, &jpeg.Options{Quality: 95}); err != nil {
+			return nil, err
+		}
+	case ".bmp":
+		rgbaImage, err := ensureRGBAImage(img)
+		if err != nil {
+			return nil, err
+		}
+		bmp, err := encodeBMP(rgbaImage)
+		if err != nil {
+			return nil, err
+		}
+		return bmp, nil
+	default:
+		return nil, fmt.Errorf("unsupported output image extension %q (supported: .png, .jpg, .jpeg, .bmp)", ext)
+	}
+
+	return out.Bytes(), nil
+}
+
+func ensureRGBAImage(img image.Image) (*image.RGBA, error) {
+	if img == nil {
+		return nil, errors.New("image is nil")
+	}
+
+	if rgba, ok := img.(*image.RGBA); ok {
+		return rgba, nil
+	}
+
+	bounds := img.Bounds()
+	rgba := image.NewRGBA(bounds)
+	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+	return rgba, nil
 }
 
 func ensureRawContent(content qinternal.Content) (qinternal.Content, []byte, error) {

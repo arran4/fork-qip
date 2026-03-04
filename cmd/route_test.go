@@ -21,6 +21,13 @@ func TestNormalizeRouteWarcArgs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%v, want %v", got, want)
 	}
+
+	inWithDashDash := []string{"docs/", "--", "--host"}
+	gotWithDashDash := normalizeRouteWarcArgs(inWithDashDash)
+	wantWithDashDash := []string{"--", "docs/", "--host"}
+	if !reflect.DeepEqual(gotWithDashDash, wantWithDashDash) {
+		t.Fatalf("args=%v, want %v", gotWithDashDash, wantWithDashDash)
+	}
 }
 
 func TestRunRouteWARCPassesModulesRoot(t *testing.T) {

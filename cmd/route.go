@@ -193,10 +193,6 @@ func parseRouteWARCHost(raw string) (string, error) {
 }
 
 func normalizeRouteWarcArgs(args []string) []string {
-	if len(args) == 0 {
-		return args
-	}
-
 	flagsWithValue := map[string]struct{}{
 		"--recipes": {},
 		"--forms":   {},
@@ -206,31 +202,7 @@ func normalizeRouteWarcArgs(args []string) []string {
 		"-o":        {},
 		"--output":  {},
 	}
-
-	normalized := make([]string, 0, len(args))
-	positionals := make([]string, 0, 2)
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			positionals = append(positionals, args[i+1:]...)
-			break
-		}
-		if strings.HasPrefix(arg, "-") && arg != "-" {
-			normalized = append(normalized, arg)
-			if strings.Contains(arg, "=") {
-				continue
-			}
-			if _, ok := flagsWithValue[arg]; ok && i+1 < len(args) {
-				i++
-				normalized = append(normalized, args[i])
-			}
-			continue
-		}
-		positionals = append(positionals, arg)
-	}
-
-	normalized = append(normalized, positionals...)
-	return normalized
+	return qinternal.NormalizeFlagArgs(args, flagsWithValue)
 }
 
 func buildMinimalWARCResponseRecord(targetURI string, response qinternal.InProcessHTTPResponse) ([]byte, error) {

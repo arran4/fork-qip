@@ -172,18 +172,11 @@ func RunComplyCommand(args []string) error {
 }
 
 func normalizeComplyArgs(args []string) []string {
-	if len(args) == 0 {
-		return args
+	flagsWithValue := map[string]struct{}{
+		"--with":       {},
+		"--timeout-ms": {},
 	}
-	first := args[0]
-	if strings.HasPrefix(first, "-") {
-		return args
-	}
-
-	normalized := make([]string, 0, len(args))
-	normalized = append(normalized, args[1:]...)
-	normalized = append(normalized, first)
-	return normalized
+	return NormalizeFlagArgs(args, flagsWithValue)
 }
 
 func readComplyModulePath(path string) ([]byte, error) {
