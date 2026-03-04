@@ -2,6 +2,7 @@
 
 - [Module Contract](/docs/module-contract)
 - [Module Patterns](/docs/module-patterns)
+- [Formats and Encodings](/docs/formats)
 - [Security Model](/docs/security-model)
 - [Content Layout v0](/docs/content_layout_v0)
 - [Recipe Layout v0](/docs/recipe_layout_v0)
