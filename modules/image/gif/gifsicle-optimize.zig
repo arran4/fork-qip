@@ -12,9 +12,11 @@ var output_buf: [OUTPUT_CAP]u8 = undefined;
 var lzw_in_buf: [INPUT_CAP]u8 = undefined;
 var lzw_out_buf: [INPUT_CAP]u8 = undefined;
 var index_buf: [INPUT_CAP]u8 = undefined;
+var canvas_buf: [INPUT_CAP]u32 = undefined;
 
 var lossy_amount: u32 = 0;
 var max_colors: u32 = 256;
+var dither_amount: u32 = 0;
 
 const OptimizeError = error{
     InvalidGif,
@@ -23,6 +25,7 @@ const OptimizeError = error{
 
 const PaletteMap = struct {
     old_count: usize,
+    active_count: usize,
     padded_count: usize,
     size_code: u8, // value stored in GIF packed field low 3 bits
     changed: bool,
@@ -70,6 +73,11 @@ export fn uniform_set_lossy(value: u32) u32 {
 export fn uniform_set_max_colors(value: u32) u32 {
     max_colors = if (value == 0 or value > 256) 256 else value;
     return max_colors;
+}
+
+export fn uniform_set_dither(value: u32) u32 {
+    dither_amount = if (value > 100) 100 else value;
+    return dither_amount;
 }
 
 fn writeByte(output: []u8, out_idx: *usize, b: u8) OptimizeError!void {
@@ -217,6 +225,7 @@ fn buildPaletteMap(table: []const u8, palette_limit: u32) OptimizeError!PaletteM
 
     var out: PaletteMap = undefined;
     out.old_count = entry_count;
+    out.active_count = entry_count;
     out.padded_count = entry_count;
     out.size_code = @as(u8, @intCast(log2ExactPow2(entry_count) - 1));
     out.changed = false;
@@ -263,6 +272,7 @@ fn buildPaletteMap(table: []const u8, palette_limit: u32) OptimizeError!PaletteM
 
     const required_count = if (unique_count < 2) @as(usize, 2) else unique_count;
     const padded_count = pow2CeilAtLeast2(required_count);
+    out.active_count = unique_count;
     out.padded_count = padded_count;
     out.size_code = @as(u8, @intCast(log2ExactPow2(padded_count) - 1));
     out.changed = true;
@@ -429,27 +439,12 @@ fn lzwDecodeIndices(compressed: []const u8, min_code_size: u8, expected_len: usi
     return out_len;
 }
 
-fn findLzwDictEntry(dict_prefix: []const u16, dict_char: []const u8, first_code: u16, next_code: u16, prefix_code: u16, ch: u8) ?u16 {
-    var code: u16 = first_code;
-    if (next_code < code) return null;
-    while (code < next_code) : (code += 1) {
-        if (dict_prefix[code] == prefix_code and dict_char[code] == ch) {
-            return code;
-        }
-    }
-    return null;
-}
-
 fn lzwEncodeIndices(indices: []const u8, min_code_size: u8, out: []u8) OptimizeError!usize {
     if (min_code_size < 2 or min_code_size > 8) return error.InvalidGif;
 
     const clear: u16 = @as(u16, 1) << @as(CodeShift, @intCast(min_code_size));
     const end: u16 = clear + 1;
-    const first_code: u16 = clear + 2;
-
-    var dict_prefix: [4096]u16 = undefined;
-    var dict_char: [4096]u8 = undefined;
-    var next_code: u16 = first_code;
+    var next_code: u16 = clear + 2;
     var code_size: u8 = min_code_size + 1;
 
     var out_len: usize = 0;
@@ -471,41 +466,33 @@ fn lzwEncodeIndices(indices: []const u8, min_code_size: u8, out: []u8) OptimizeE
     }.run;
 
     try writeCode(clear, code_size, out, &out_len, &bitbuf, &bitcount);
+    var first_after_clear = true;
 
-    if (indices.len == 0) {
-        try writeCode(end, code_size, out, &out_len, &bitbuf, &bitcount);
-    } else {
-        var prefix_code: u16 = indices[0];
-        var i: usize = 1;
-        while (i < indices.len) : (i += 1) {
-            const ch = indices[i];
-            const found = findLzwDictEntry(dict_prefix[0..], dict_char[0..], first_code, next_code, prefix_code, ch);
-            if (found) |code| {
-                prefix_code = code;
-                continue;
-            }
+    var i: usize = 0;
+    while (i < indices.len) : (i += 1) {
+        const lit = @as(u16, indices[i]);
+        if (lit >= clear) return error.InvalidGif;
+        try writeCode(lit, code_size, out, &out_len, &bitbuf, &bitcount);
 
-            try writeCode(prefix_code, code_size, out, &out_len, &bitbuf, &bitcount);
-
-            if (next_code < 4096) {
-                dict_prefix[next_code] = prefix_code;
-                dict_char[next_code] = ch;
-                next_code += 1;
-                if (next_code == (@as(u16, 1) << @as(CodeShift, @intCast(code_size))) and code_size < 12) {
-                    code_size += 1;
-                }
-            } else {
-                try writeCode(clear, code_size, out, &out_len, &bitbuf, &bitcount);
-                next_code = first_code;
-                code_size = min_code_size + 1;
-            }
-
-            prefix_code = @as(u16, ch);
+        if (first_after_clear) {
+            first_after_clear = false;
+            continue;
         }
 
-        try writeCode(prefix_code, code_size, out, &out_len, &bitbuf, &bitcount);
-        try writeCode(end, code_size, out, &out_len, &bitbuf, &bitcount);
+        if (next_code < 4096) {
+            next_code += 1;
+            if (next_code == (@as(u16, 1) << @as(CodeShift, @intCast(code_size))) and code_size < 12) {
+                code_size += 1;
+            }
+        } else {
+            try writeCode(clear, code_size, out, &out_len, &bitbuf, &bitcount);
+            code_size = min_code_size + 1;
+            next_code = clear + 2;
+            first_after_clear = true;
+        }
     }
+
+    try writeCode(end, code_size, out, &out_len, &bitbuf, &bitcount);
 
     if (bitcount > 0) {
         if (out_len >= out.len) return error.OutputOverflow;
@@ -514,6 +501,124 @@ fn lzwEncodeIndices(indices: []const u8, min_code_size: u8, out: []u8) OptimizeE
     }
 
     return out_len;
+}
+
+fn paletteColorU32(table: []const u8, idx: u8) u32 {
+    const base = @as(usize, idx) * 3;
+    if (base + 2 >= table.len) return 0;
+    return (@as(u32, table[base]) << 16) | (@as(u32, table[base + 1]) << 8) | @as(u32, table[base + 2]);
+}
+
+fn deinterlaceToRows(src: []const u8, dst: []u8, width: usize, height: usize) OptimizeError!void {
+    if (src.len != width * height or dst.len != width * height) return error.InvalidGif;
+    var p: usize = 0;
+    const starts = [_]usize{ 0, 4, 2, 1 };
+    const steps = [_]usize{ 8, 8, 4, 2 };
+    var pass: usize = 0;
+    while (pass < 4) : (pass += 1) {
+        var y = starts[pass];
+        while (y < height) : (y += steps[pass]) {
+            const row_off = y * width;
+            if (p + width > src.len) return error.InvalidGif;
+            @memcpy(dst[row_off .. row_off + width], src[p .. p + width]);
+            p += width;
+        }
+    }
+    if (p != src.len) return error.InvalidGif;
+}
+
+fn nearestPaletteIndex(table: []const u8, count: usize, r: i32, g: i32, b: i32) u8 {
+    var best_idx: u8 = 0;
+    var best_dist: u32 = std.math.maxInt(u32);
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const base = i * 3;
+        const pr = @as(i32, table[base]);
+        const pg = @as(i32, table[base + 1]);
+        const pb = @as(i32, table[base + 2]);
+        const dr = r - pr;
+        const dg = g - pg;
+        const db = b - pb;
+        const dist = @as(u32, @intCast(dr * dr + dg * dg + db * db));
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_idx = @as(u8, @intCast(i));
+        }
+    }
+    return best_idx;
+}
+
+fn clampU8(v: i32) u8 {
+    if (v <= 0) return 0;
+    if (v >= 255) return 255;
+    return @as(u8, @intCast(v));
+}
+
+fn remapFrameIndices(
+    indices_row_major: []u8,
+    width: usize,
+    height: usize,
+    old_table: []const u8,
+    map: *const PaletteMap,
+    transparent_old: ?u8,
+    dither_pct: u32,
+) void {
+    if (!map.changed) return;
+    if (dither_pct == 0 or map.active_count == 0) {
+        var i: usize = 0;
+        while (i < indices_row_major.len) : (i += 1) {
+            const old_idx = indices_row_major[i];
+            if (transparent_old) |t| {
+                if (old_idx == t) {
+                    indices_row_major[i] = map.old_to_new[t];
+                    continue;
+                }
+            }
+            indices_row_major[i] = map.old_to_new[old_idx];
+        }
+        return;
+    }
+
+    const bayer4 = [_]i32{
+        0,  8,  2,  10,
+        12, 4,  14, 6,
+        3,  11, 1,  9,
+        15, 7,  13, 5,
+    };
+    const strength = @as(i32, @intCast((dither_pct * 32) / 100));
+
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        var x: usize = 0;
+        while (x < width) : (x += 1) {
+            const i = y * width + x;
+            const old_idx = indices_row_major[i];
+            if (transparent_old) |t| {
+                if (old_idx == t) {
+                    indices_row_major[i] = map.old_to_new[t];
+                    continue;
+                }
+            }
+            const old_base = @as(usize, old_idx) * 3;
+            const d = bayer4[(y & 3) * 4 + (x & 3)] - 8;
+            const delta = d * strength;
+            const r = clampU8(@as(i32, old_table[old_base]) + delta);
+            const g = clampU8(@as(i32, old_table[old_base + 1]) + delta);
+            const b = clampU8(@as(i32, old_table[old_base + 2]) + delta);
+            indices_row_major[i] = nearestPaletteIndex(map.table_bytes[0 .. map.padded_count * 3], map.active_count, r, g, b);
+        }
+    }
+}
+
+fn clearCanvasRect(canvas: []u32, screen_w: usize, screen_h: usize, x: usize, y: usize, w: usize, h: usize, color: u32) void {
+    if (x >= screen_w or y >= screen_h) return;
+    const max_w = @min(w, screen_w - x);
+    const max_h = @min(h, screen_h - y);
+    var yy: usize = 0;
+    while (yy < max_h) : (yy += 1) {
+        const row = (y + yy) * screen_w + x;
+        @memset(canvas[row .. row + max_w], color);
+    }
 }
 
 fn countImageDescriptorBlocks(input: []const u8) OptimizeError!u32 {
@@ -607,9 +712,17 @@ fn optimizeGif(input: []const u8, output: []u8, lossy: u32, palette_limit: u32) 
     const effective_palette_limit = effectivePaletteLimit(palette_limit, lossy);
 
     var pos = try copyHeaderAndGlobalTable(input, output, &out_idx);
+    const screen_w_u16 = try readU16LE(input, 6);
+    const screen_h_u16 = try readU16LE(input, 8);
+    const screen_w = @as(usize, screen_w_u16);
+    const screen_h = @as(usize, screen_h_u16);
+    const canvas_len_u64 = @as(u64, screen_w_u16) * @as(u64, screen_h_u16);
+    if (canvas_len_u64 > INPUT_CAP) return error.OutputOverflow;
+    const canvas_len = @as(usize, @intCast(canvas_len_u64));
 
     const has_global_table = (input[10] & 0x80) != 0;
     var global_map: PaletteMap = undefined;
+    var global_table_in: []const u8 = input[0..0];
     var have_global_map = false;
     if (has_global_table) {
         const table_bits: u8 = @as(u8, @intCast((input[10] & 0x07) + 1));
@@ -618,19 +731,31 @@ fn optimizeGif(input: []const u8, output: []u8, lossy: u32, palette_limit: u32) 
         const gct_start: usize = 13;
         const gct_end: usize = gct_start + table_len;
         if (gct_end > input.len) return error.InvalidGif;
+        global_table_in = input[gct_start..gct_end];
 
-        global_map = try buildPaletteMap(input[gct_start..gct_end], effective_palette_limit);
+        global_map = try buildPaletteMap(global_table_in, effective_palette_limit);
         have_global_map = true;
         if (global_map.changed) {
             out_idx = 13;
             output[10] = (output[10] & 0xF8) | (global_map.size_code & 0x07);
             try writeSlice(output, &out_idx, global_map.table_bytes[0 .. global_map.padded_count * 3]);
+            output[11] = global_map.old_to_new[input[11]];
         }
         pos = gct_end;
     }
 
+    var bg_color: u32 = 0;
+    if (have_global_map) {
+        const bg_index = output[11];
+        bg_color = paletteColorU32(global_map.table_bytes[0 .. global_map.padded_count * 3], bg_index);
+    }
+    @memset(canvas_buf[0..canvas_len], bg_color);
+
     var pending_gce: [259]u8 = undefined;
     var pending_gce_len: usize = 0;
+    var have_emitted_frame = false;
+    var last_emitted_disposal: u8 = 0;
+    var last_emitted_delay_off: ?usize = null;
 
     while (true) {
         if (pos >= input.len) return error.InvalidGif;
@@ -720,6 +845,18 @@ fn optimizeGif(input: []const u8, output: []u8, lossy: u32, palette_limit: u32) 
                 var desc_out: [9]u8 = undefined;
                 @memcpy(desc_out[0..], desc);
 
+                const frame_x_u16 = try readU16LE(desc, 0);
+                const frame_y_u16 = try readU16LE(desc, 2);
+                const frame_w_u16 = try readU16LE(desc, 4);
+                const frame_h_u16 = try readU16LE(desc, 6);
+                if (frame_w_u16 == 0 or frame_h_u16 == 0) return error.InvalidGif;
+
+                const frame_x = @as(usize, frame_x_u16);
+                const frame_y = @as(usize, frame_y_u16);
+                const frame_w = @as(usize, frame_w_u16);
+                const frame_h = @as(usize, frame_h_u16);
+                if (frame_x + frame_w > screen_w or frame_y + frame_h > screen_h) return error.InvalidGif;
+
                 const packed_fields = desc[8];
                 var local_table_len: usize = 0;
                 if ((packed_fields & 0x80) != 0) {
@@ -733,65 +870,215 @@ fn optimizeGif(input: []const u8, output: []u8, lossy: u32, palette_limit: u32) 
                 if (pos >= input.len) return error.InvalidGif;
                 const lzw_min_code_size_in = input[pos];
                 pos += 1;
+                if (lzw_min_code_size_in < 2 or lzw_min_code_size_in > 8) return error.InvalidGif;
 
                 var local_map: PaletteMap = undefined;
                 var active_map: ?*const PaletteMap = null;
-                var remap_needed = false;
+                var old_table: []const u8 = input[0..0];
 
                 if (local_table_len > 0) {
                     local_map = try buildPaletteMap(local_table, effective_palette_limit);
                     active_map = &local_map;
-                    remap_needed = local_map.changed;
+                    old_table = local_table;
                     if (local_map.changed) {
                         desc_out[8] = (desc_out[8] & 0xF8) | (local_map.size_code & 0x07);
                     }
                 } else if (have_global_map) {
                     active_map = &global_map;
-                    remap_needed = global_map.changed;
+                    old_table = global_table_in;
+                } else {
+                    return error.InvalidGif;
                 }
 
-                if (remap_needed and pending_gce_len >= 8 and pending_gce[1] == 0xF9 and pending_gce[2] >= 4) {
+                var current_disposal: u8 = 0;
+                var current_delay: u16 = 0;
+                var transparent_old: ?u8 = null;
+                if (pending_gce_len >= 8 and pending_gce[1] == 0xF9 and pending_gce[2] >= 4) {
                     const gce_packed = pending_gce[3];
-                    if ((gce_packed & 0x01) != 0 and active_map != null) {
-                        const old_transparent = pending_gce[6];
-                        pending_gce[6] = active_map.?.old_to_new[old_transparent];
+                    current_disposal = (gce_packed >> 2) & 0x07;
+                    current_delay = @as(u16, pending_gce[4]) | (@as(u16, pending_gce[5]) << 8);
+                    if ((gce_packed & 0x01) != 0) {
+                        transparent_old = pending_gce[6];
                     }
                 }
 
+                var transparent_new: ?u8 = transparent_old;
+                if (active_map.?.changed) {
+                    if (transparent_old) |to| {
+                        const mapped = active_map.?.old_to_new[to];
+                        transparent_new = mapped;
+                        if (pending_gce_len >= 8 and pending_gce[1] == 0xF9 and pending_gce[2] >= 4) {
+                            pending_gce[6] = mapped;
+                        }
+                    }
+                }
+
+                const frame_pixels_u64 = @as(u64, frame_w_u16) * @as(u64, frame_h_u16);
+                if (frame_pixels_u64 > INPUT_CAP) return error.OutputOverflow;
+                const frame_pixels = @as(usize, @intCast(frame_pixels_u64));
+                const compressed_len = try collectSubBlocks(input, &pos, lzw_in_buf[0..]);
+                _ = try lzwDecodeIndices(lzw_in_buf[0..compressed_len], lzw_min_code_size_in, frame_pixels, lzw_out_buf[0..frame_pixels]);
+
+                if ((packed_fields & 0x40) != 0) {
+                    try deinterlaceToRows(lzw_out_buf[0..frame_pixels], index_buf[0..frame_pixels], frame_w, frame_h);
+                } else {
+                    @memcpy(index_buf[0..frame_pixels], lzw_out_buf[0..frame_pixels]);
+                }
+
+                remapFrameIndices(index_buf[0..frame_pixels], frame_w, frame_h, old_table, active_map.?, transparent_old, dither_amount);
+
+                const palette_out = active_map.?.table_bytes[0 .. active_map.?.padded_count * 3];
+                var changed_count: usize = 0;
+                var min_x = frame_w;
+                var min_y = frame_h;
+                var max_x: usize = 0;
+                var max_y: usize = 0;
+
+                var fy: usize = 0;
+                while (fy < frame_h) : (fy += 1) {
+                    var fx: usize = 0;
+                    while (fx < frame_w) : (fx += 1) {
+                        const frame_i = fy * frame_w + fx;
+                        const idx = index_buf[frame_i];
+                        const canvas_i = (frame_y + fy) * screen_w + (frame_x + fx);
+                        const old_color = canvas_buf[canvas_i];
+
+                        var new_color = old_color;
+                        if (transparent_new) |t| {
+                            if (idx != t) new_color = paletteColorU32(palette_out, idx);
+                        } else {
+                            new_color = paletteColorU32(palette_out, idx);
+                        }
+
+                        if (new_color != old_color) {
+                            changed_count += 1;
+                            if (fx < min_x) min_x = fx;
+                            if (fy < min_y) min_y = fy;
+                            if (fx > max_x) max_x = fx;
+                            if (fy > max_y) max_y = fy;
+                        }
+                    }
+                }
+
+                const disposal_none = current_disposal == 0 or current_disposal == 1;
+                const duplicate_skip_ok = changed_count == 0 and disposal_none and have_emitted_frame and
+                    (last_emitted_disposal == 0 or last_emitted_disposal == 1) and last_emitted_delay_off != null;
+                if (duplicate_skip_ok) {
+                    const off = last_emitted_delay_off.?;
+                    const prev = @as(u16, output[off]) | (@as(u16, output[off + 1]) << 8);
+                    const sum_u32 = @as(u32, prev) + @as(u32, current_delay);
+                    const merged: u16 = if (sum_u32 > 0xFFFF) 0xFFFF else @as(u16, @intCast(sum_u32));
+                    output[off] = @as(u8, @intCast(merged & 0xFF));
+                    output[off + 1] = @as(u8, @intCast(merged >> 8));
+                    pending_gce_len = 0;
+                    continue;
+                }
+
+                var emit_x = frame_x;
+                var emit_y = frame_y;
+                var emit_w = frame_w;
+                var emit_h = frame_h;
+                var emit_indices = index_buf[0..frame_pixels];
+                var did_crop = false;
+
+                const can_crop = changed_count > 0 and current_disposal != 2;
+                if (can_crop) {
+                    const crop_x = min_x;
+                    const crop_y = min_y;
+                    const crop_w = max_x - min_x + 1;
+                    const crop_h = max_y - min_y + 1;
+                    if (!(crop_x == 0 and crop_y == 0 and crop_w == frame_w and crop_h == frame_h)) {
+                        did_crop = true;
+                        emit_x = frame_x + crop_x;
+                        emit_y = frame_y + crop_y;
+                        emit_w = crop_w;
+                        emit_h = crop_h;
+
+                        const emit_pixels = emit_w * emit_h;
+                        var cy: usize = 0;
+                        while (cy < emit_h) : (cy += 1) {
+                            const src = (crop_y + cy) * frame_w + crop_x;
+                            const dst = cy * emit_w;
+                            std.mem.copyForwards(u8, index_buf[dst .. dst + emit_w], index_buf[src .. src + emit_w]);
+                        }
+                        emit_indices = index_buf[0..emit_pixels];
+
+                        const ex16 = @as(u16, @intCast(emit_x));
+                        const ey16 = @as(u16, @intCast(emit_y));
+                        const ew16 = @as(u16, @intCast(emit_w));
+                        const eh16 = @as(u16, @intCast(emit_h));
+                        desc_out[0] = @as(u8, @intCast(ex16 & 0xFF));
+                        desc_out[1] = @as(u8, @intCast(ex16 >> 8));
+                        desc_out[2] = @as(u8, @intCast(ey16 & 0xFF));
+                        desc_out[3] = @as(u8, @intCast(ey16 >> 8));
+                        desc_out[4] = @as(u8, @intCast(ew16 & 0xFF));
+                        desc_out[5] = @as(u8, @intCast(ew16 >> 8));
+                        desc_out[6] = @as(u8, @intCast(eh16 & 0xFF));
+                        desc_out[7] = @as(u8, @intCast(eh16 >> 8));
+                    }
+                }
+
+                const passthrough = !did_crop and !active_map.?.changed;
+
+                var current_delay_off: ?usize = null;
                 if (pending_gce_len > 0) {
+                    const gce_start = out_idx;
                     try writeSlice(output, &out_idx, pending_gce[0..pending_gce_len]);
+                    if (pending_gce_len >= 8 and pending_gce[1] == 0xF9 and pending_gce[2] >= 4) {
+                        current_delay_off = gce_start + 4;
+                    } else {
+                        current_delay_off = null;
+                    }
                     pending_gce_len = 0;
                 }
+
                 try writeByte(output, &out_idx, 0x2C);
-                try writeSlice(output, &out_idx, desc_out[0..]);
+                if (passthrough) {
+                    try writeSlice(output, &out_idx, desc);
+                } else {
+                    desc_out[8] &= 0xBF; // clear interlace flag; encoder outputs row-major
+                    try writeSlice(output, &out_idx, desc_out[0..]);
+                }
                 if (local_table_len > 0) {
-                    if (local_map.changed) {
+                    if (passthrough) {
+                        try writeSlice(output, &out_idx, local_table);
+                    } else if (local_map.changed) {
                         try writeSlice(output, &out_idx, local_map.table_bytes[0 .. local_map.padded_count * 3]);
                     } else {
                         try writeSlice(output, &out_idx, local_table);
                     }
                 }
 
-                if (!remap_needed or active_map == null) {
+                if (passthrough) {
                     try writeByte(output, &out_idx, lzw_min_code_size_in);
-                    try copySubBlocksRechunk(input, &pos, output, &out_idx);
-                    continue;
+                    try writeSubBlocks(output, &out_idx, lzw_in_buf[0..compressed_len]);
+                } else {
+                    const lzw_min_code_size_out = minCodeSizeForPaletteEntries(active_map.?.padded_count);
+                    try writeByte(output, &out_idx, lzw_min_code_size_out);
+                    const encoded_len = try lzwEncodeIndices(emit_indices, lzw_min_code_size_out, lzw_out_buf[0..]);
+                    try writeSubBlocks(output, &out_idx, lzw_out_buf[0..encoded_len]);
                 }
 
-                const compressed_len = try collectSubBlocks(input, &pos, lzw_in_buf[0..]);
-                const pixel_count = try pixelCountFromImageDescriptor(desc);
-                _ = try lzwDecodeIndices(lzw_in_buf[0..compressed_len], lzw_min_code_size_in, pixel_count, index_buf[0..pixel_count]);
+                have_emitted_frame = true;
+                last_emitted_disposal = current_disposal;
+                last_emitted_delay_off = current_delay_off;
 
-                var i: usize = 0;
-                while (i < pixel_count) : (i += 1) {
-                    index_buf[i] = active_map.?.old_to_new[index_buf[i]];
+                if (current_disposal == 0 or current_disposal == 1) {
+                    var ay: usize = 0;
+                    while (ay < emit_h) : (ay += 1) {
+                        var ax: usize = 0;
+                        while (ax < emit_w) : (ax += 1) {
+                            const idx = emit_indices[ay * emit_w + ax];
+                            if (transparent_new) |t| {
+                                if (idx == t) continue;
+                            }
+                            const canvas_i = (emit_y + ay) * screen_w + (emit_x + ax);
+                            canvas_buf[canvas_i] = paletteColorU32(palette_out, idx);
+                        }
+                    }
+                } else if (current_disposal == 2) {
+                    clearCanvasRect(canvas_buf[0..canvas_len], screen_w, screen_h, emit_x, emit_y, emit_w, emit_h, bg_color);
                 }
-
-                const lzw_min_code_size_out = minCodeSizeForPaletteEntries(active_map.?.padded_count);
-                try writeByte(output, &out_idx, lzw_min_code_size_out);
-
-                const encoded_len = try lzwEncodeIndices(index_buf[0..pixel_count], lzw_min_code_size_out, lzw_out_buf[0..]);
-                try writeSubBlocks(output, &out_idx, lzw_out_buf[0..encoded_len]);
             },
             else => return error.InvalidGif,
         }
@@ -824,7 +1111,7 @@ test "strips comment extension and keeps valid trailer" {
     try std.testing.expect(std.mem.indexOf(u8, out[0..out_len], "abc") == null);
 }
 
-test "lossy mode preserves animation frames" {
+test "dedupe merges identical consecutive frames" {
     const input = [_]u8{
         'G',  'I',  'F',  '8',  '9',  'a',
         0x01, 0x00, 0x01, 0x00, 0x80, 0x00,
@@ -842,16 +1129,11 @@ test "lossy mode preserves animation frames" {
         0x02, 0x02, 0x44, 0x01, 0x00, 0x3B,
     };
 
-    var lossless_out: [512]u8 = undefined;
-    const lossless_len = try optimizeGif(input[0..], lossless_out[0..], 0, 256);
-
-    var lossy_out: [512]u8 = undefined;
-    const lossy_len = try optimizeGif(input[0..], lossy_out[0..], 100, 256);
-
-    const lossless_frames = try countImageDescriptorBlocks(lossless_out[0..lossless_len]);
-    const lossy_frames = try countImageDescriptorBlocks(lossy_out[0..lossy_len]);
-    try std.testing.expectEqual(lossless_frames, lossy_frames);
-    try std.testing.expectEqual(@as(u32, 2), lossy_frames);
+    var out: [512]u8 = undefined;
+    const out_len = try optimizeGif(input[0..], out[0..], 0, 256);
+    const frames = try countImageDescriptorBlocks(out[0..out_len]);
+    try std.testing.expectEqual(@as(u32, 1), frames);
+    try std.testing.expect(std.mem.indexOf(u8, out[0..out_len], &[_]u8{ 0x02, 0x00 }) != null);
 }
 
 test "max_colors quantizes global palette" {
