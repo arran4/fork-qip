@@ -206,6 +206,42 @@ fn findH1CloseStart(s: []const u8, from: usize) ?usize {
     return null;
 }
 
+fn findTitleCloseStart(s: []const u8, from: usize) ?usize {
+    var i = from;
+    while (i + 7 < s.len) : (i += 1) {
+        if (s[i] != '<' or s[i + 1] != '/') continue;
+        if (asciiLower(s[i + 2]) != 't') continue;
+        if (asciiLower(s[i + 3]) != 'i') continue;
+        if (asciiLower(s[i + 4]) != 't') continue;
+        if (asciiLower(s[i + 5]) != 'l') continue;
+        if (asciiLower(s[i + 6]) != 'e') continue;
+        if (!isTagNameBoundary(s[i + 7])) continue;
+        return i;
+    }
+    return null;
+}
+
+fn findFirstHtmlTitle(input: []const u8) ?Candidate {
+    var i: usize = 0;
+    while (i + 6 < input.len) : (i += 1) {
+        if (input[i] != '<') continue;
+        if (asciiLower(input[i + 1]) != 't') continue;
+        if (asciiLower(input[i + 2]) != 'i') continue;
+        if (asciiLower(input[i + 3]) != 't') continue;
+        if (asciiLower(input[i + 4]) != 'l') continue;
+        if (asciiLower(input[i + 5]) != 'e') continue;
+        if (!isTagNameBoundary(input[i + 6])) continue;
+
+        const open_end = findTagEnd(input, i + 6) orelse continue;
+        const close_start = findTitleCloseStart(input, open_end) orelse input.len;
+        return .{
+            .start = i,
+            .text = input[open_end..close_start],
+        };
+    }
+    return null;
+}
+
 fn findFirstHtmlH1(input: []const u8) ?Candidate {
     var i: usize = 0;
     while (i + 3 < input.len) : (i += 1) {
@@ -293,6 +329,11 @@ fn earlier(a: ?Candidate, b: Candidate) Candidate {
 }
 
 fn findTitleSlice(input: []const u8) ?[]const u8 {
+    if (findFirstHtmlTitle(input)) |c| return c.text;
+    return findHeadingTitleSlice(input);
+}
+
+fn findHeadingTitleSlice(input: []const u8) ?[]const u8 {
     var best: ?Candidate = null;
     if (findFirstHtmlH1(input)) |c| best = c;
     if (findFirstAtxH1(input)) |c| best = earlier(best, c);
@@ -540,9 +581,16 @@ fn appendPlainInline(w: *Writer, s: []const u8, depth: u8) void {
 }
 
 fn extractTitleToOutput(input: []const u8, out: []u8) u32 {
-    const title = findTitleSlice(input) orelse return 0;
+    if (findTitleSlice(input)) |title| {
+        var writer = Writer{ .buf = out };
+        appendPlainInline(&writer, title, 0);
+        const n = writer.finish();
+        if (n > 0) return n;
+    }
+
+    const fallback = findHeadingTitleSlice(input) orelse return 0;
     var writer = Writer{ .buf = out };
-    appendPlainInline(&writer, title, 0);
+    appendPlainInline(&writer, fallback, 0);
     return writer.finish();
 }
 
@@ -560,6 +608,18 @@ test "extracts markdown h1 and strips emphasis" {
 test "extracts html h1 and strips tags/entities" {
     var out: [128]u8 = undefined;
     const n = extractTitleToOutput("<h1>Hello&nbsp;<code>World</code></h1>", out[0..]);
+    try std.testing.expectEqualStrings("Hello World", out[0..n]);
+}
+
+test "extracts html title and strips tags/entities" {
+    var out: [128]u8 = undefined;
+    const n = extractTitleToOutput("<title>Hello&nbsp;<em>World</em> &amp; Co</title><h1>Ignored</h1>", out[0..]);
+    try std.testing.expectEqualStrings("Hello World & Co", out[0..n]);
+}
+
+test "falls back to heading if html title is empty" {
+    var out: [128]u8 = undefined;
+    const n = extractTitleToOutput("<title>   </title>\n# Hello World", out[0..]);
     try std.testing.expectEqualStrings("Hello World", out[0..n]);
 }
 
