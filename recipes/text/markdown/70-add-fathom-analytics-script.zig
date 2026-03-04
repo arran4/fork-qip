@@ -46,8 +46,8 @@ fn injectFathom(input: []const u8, output: []u8) usize {
     const required = input.len + FATHOM_SNIPPET.len;
     if (required > output.len) @panic("output buffer overflow");
 
-    @memcpy(output[0..input.len], input);
-    @memcpy(output[input.len..required], FATHOM_SNIPPET);
+    @memcpy(output[0..FATHOM_SNIPPET.len], FATHOM_SNIPPET);
+    @memcpy(output[FATHOM_SNIPPET.len..required], input);
     return required;
 }
 
@@ -59,9 +59,9 @@ export fn run(input_size: u32) u32 {
     return @as(u32, @intCast(written));
 }
 
-test "appends snippet to html" {
+test "prepends snippet to html" {
     const input = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body>ok</body></html>";
-    const expected = input ++ FATHOM_SNIPPET;
+    const expected = FATHOM_SNIPPET ++ input;
     var out: [expected.len]u8 = undefined;
     const written = injectFathom(input, out[0..]);
     try std.testing.expectEqualStrings(expected, out[0..written]);

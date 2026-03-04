@@ -101,6 +101,40 @@ func TestRunRouteWARCArchivesAllPaths(t *testing.T) {
 	}
 }
 
+func TestRunRouteWARCTransformsArchive(t *testing.T) {
+	var out bytes.Buffer
+	var transformedInput []byte
+	err := RunRoute([]string{"warc", "docs"}, RouteConfig{
+		UsageRoute:     "usage route",
+		UsageRouteWarc: "usage route warc",
+		DefaultMode:    "dev",
+		Stdout:         &out,
+		ListWARCPaths: func(ctx context.Context, request RouteWARCRequest) ([]string, error) {
+			return []string{"/a"}, nil
+		},
+		ResolveWARC: func(ctx context.Context, request RouteWARCRequest) (qinternal.InProcessHTTPResponse, error) {
+			return qinternal.InProcessHTTPResponse{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/plain"}},
+				Body:       []byte("ok"),
+			}, nil
+		},
+		TransformWARC: func(ctx context.Context, request RouteWARCRequest, warc []byte) ([]byte, error) {
+			transformedInput = append([]byte(nil), warc...)
+			return []byte("transformed"), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunRoute: %v", err)
+	}
+	if len(transformedInput) == 0 || !bytes.Contains(transformedInput, []byte("WARC/1.0\r\n")) {
+		t.Fatalf("expected original WARC archive bytes to be passed to TransformWARC")
+	}
+	if out.String() != "transformed" {
+		t.Fatalf("stdout=%q, want transformed", out.String())
+	}
+}
+
 func TestRunRouteWARCNoPaths(t *testing.T) {
 	err := RunRoute([]string{"warc", "docs"}, RouteConfig{
 		UsageRoute:     "usage route",

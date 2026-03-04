@@ -1,4 +1,4 @@
-.PHONY: compliance modules recipes modules-wat-wasm modules-c-wasm modules-zig-wasm test test-go site-static install
+.PHONY: compliance modules recipes modules-wat-wasm modules-c-wasm modules-zig-wasm test test-go site-static site-og-images install
 
 default: qip compliance modules recipes
 
@@ -76,6 +76,10 @@ modules/%.wasm: modules/%.zig
 recipes/%.wasm: recipes/%.zig
 	$(ZIG_ENV) zig build-exe $< $(ZIG_WASM_FLAGS) -femit-bin=$@
 
+recipes/application/warc/10-add-open-graph-image-meta.wasm: modules/application/warc/warc-add-open-graph-image-meta.wasm
+	@mkdir -p $(dir $@)
+	ln -sf ../../../modules/application/warc/warc-add-open-graph-image-meta.wasm $@
+
 modules-wat-wasm: $(MODULE_WAT_TARGETS)
 modules-c-wasm: $(MODULE_C_TARGETS)
 modules-zig-wasm: $(MODULE_ZIG_TARGETS)
@@ -85,6 +89,7 @@ modules-zig-wasm: recipes/text/markdown/10-markdown-basic.wasm
 modules-zig-wasm: recipes/text/markdown/80-html-page-wrap.wasm
 
 recipes: $(patsubst recipes/text/markdown/%.zig,recipes/text/markdown/%.wasm,$(wildcard recipes/text/markdown/*.zig))
+recipes: recipes/application/warc/10-add-open-graph-image-meta.wasm
 
 modules: modules-wat-wasm modules-c-wasm modules-zig-wasm
 
@@ -176,10 +181,27 @@ test-go:
 site/favicon.ico: qip-logo.svg
 	$(QIP_BIN) run -i qip-logo.svg -- modules/image/svg+xml/svg-rasterize.wasm modules/image/bmp/bmp-double.wasm modules/image/bmp/bmp-double.wasm modules/image/bmp/bmp-to-ico.wasm > $@
 
+site-og-images: modules/text/markdown/extract-title-text.wasm modules/utf8/text-to-path-svg-dejavu-sans-mono.wasm modules/image/svg+xml/svg-rasterize.wasm
+	@rm -rf site/_og
+	@mkdir -p site/_og
+	@find site docs -type f \( -name '*.md' -o -name '*.markdown' \) | sort | while IFS= read -r src; do \
+		rel_no_ext="$${src%.*}"; \
+		case "$$rel_no_ext" in \
+			site/*) rel="$${rel_no_ext#site/}" ;; \
+			docs/*) rel="docs/$${rel_no_ext#docs/}" ;; \
+			*) continue ;; \
+		esac; \
+		rel="$${rel%/index}"; \
+		if [ -z "$$rel" ]; then rel="index"; fi; \
+		out="site/_og/$$rel.png"; \
+		mkdir -p "$$(dirname "$$out")"; \
+		$(QIP_BIN) run -i "$$src" -o "$$out" -- modules/text/markdown/extract-title-text.wasm modules/utf8/text-to-path-svg-dejavu-sans-mono.wasm '?width=1200&height=630' modules/image/svg+xml/svg-rasterize.wasm '?background_color_rgba=0xffffffff'; \
+	done
+
 install:
 	go install github.com/royalicing/qip@latest
 
-site-static:
+site-static: site-og-images recipes/application/warc/10-add-open-graph-image-meta.wasm
 	$(QIP_BIN) route warc ./site --recipes recipes --forms modules/form --modules modules --view-source | $(QIP_BIN) run modules/application/warc/warc-check-broken-links.wasm modules/application/warc/warc-to-static-tar-no-trailing-slash.wasm > site-static.tar && mkdir -p site-static && tar -xvf site-static.tar -C site-static
 
 defluff:

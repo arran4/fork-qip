@@ -38,6 +38,7 @@ type RouteConfig struct {
 	DefaultMode    string
 	ListWARCPaths  func(context.Context, RouteWARCRequest) ([]string, error)
 	ResolveWARC    func(context.Context, RouteWARCRequest) (qinternal.InProcessHTTPResponse, error)
+	TransformWARC  func(context.Context, RouteWARCRequest, []byte) ([]byte, error)
 	Stdout         io.Writer
 	WriteFile      func(string, []byte, os.FileMode) error
 	Verbosef       func(format string, args ...any)
@@ -165,18 +166,27 @@ func runRouteWARC(args []string, config RouteConfig) error {
 		}
 	}
 
+	warcOutput := warcBytes.Bytes()
+	if config.TransformWARC != nil {
+		transformed, err := config.TransformWARC(context.Background(), baseRequest, warcOutput)
+		if err != nil {
+			return fmt.Errorf("failed to transform warc archive: %w", err)
+		}
+		warcOutput = transformed
+	}
+
 	if outputPath == "" || outputPath == "-" {
-		if _, err := config.Stdout.Write(warcBytes.Bytes()); err != nil {
+		if _, err := config.Stdout.Write(warcOutput); err != nil {
 			return fmt.Errorf("error writing WARC to stdout: %w", err)
 		}
 	} else {
-		if err := config.WriteFile(outputPath, warcBytes.Bytes(), 0o644); err != nil {
+		if err := config.WriteFile(outputPath, warcOutput, 0o644); err != nil {
 			return fmt.Errorf("error writing WARC file: %w", err)
 		}
 	}
 
 	if verbose && config.Verbosef != nil {
-		config.Verbosef("route warc: host=%s paths=%d bytes=%d output=%s", host, len(paths), warcBytes.Len(), outputPath)
+		config.Verbosef("route warc: host=%s paths=%d bytes=%d output=%s", host, len(paths), len(warcOutput), outputPath)
 	}
 	return nil
 }
