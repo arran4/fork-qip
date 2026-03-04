@@ -57,3 +57,18 @@ We have snapshots in `test/latest.txt` that are matched against `test/expected.t
 ## Optimization
 
 When implementing a common algorithm, benchmark against other implementations. For example Go stdlib has many, so does Python, and Zig has a few. Or use what CLIs are installed. When looking at making a performance improvement, be sure to benchmark before and after to measure what the improvement was. You can use `qip bench` to benchmark the module. For big changes I’m ok with cloning the module, this way we can compare the before and after more easily.
+
+## Docs Style Guide
+
+Write docs that are engaging, informed, opinionated, and friendly. Avoid rants and avoid dry spec-only prose. See `docs/formats.md` for an example.
+
+- Open with a clear thesis sentence that states a position.
+- Use `claim -> reason -> example` structure for key sections.
+- Prefer concrete language and direct verbs over abstract wording.
+- Include tradeoffs when recommending a default.
+- Use practical examples from this repo (commands, module paths, pipelines).
+- Keep tone confident and helpful: say "we prefer X because Y".
+- Avoid absolutist language unless it is a hard contract requirement.
+- Add short "when not to use this" guidance where appropriate.
+- Favor small decision rubrics/checklists for fast reader decisions.
+- Keep pages skimmable with short sections and tight bullets.
