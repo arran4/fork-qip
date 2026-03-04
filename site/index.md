@@ -1,3 +1,5 @@
+<title>qip: vibe fast zig/c as composable wasm</title>
+
 # `qip`
 
 ## _vibe fast zig/c as composable wasm_
