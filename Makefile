@@ -195,7 +195,7 @@ site-og-images: modules/text/markdown/extract-title-text.wasm modules/utf8/text-
 		if [ -z "$$rel" ]; then rel="index"; fi; \
 		out="site/_og/$$rel.png"; \
 		mkdir -p "$$(dirname "$$out")"; \
-		$(QIP_BIN) run -i "$$src" -o "$$out" -- modules/text/markdown/extract-title-text.wasm modules/utf8/text-to-path-svg-dejavu-sans-mono.wasm '?width=1200&height=630&font_size=72' modules/image/svg+xml/svg-rasterize.wasm '?background_color_rgba=0xeecc33ff'; \
+		$(QIP_BIN) run -i "$$src" -o "$$out" -- modules/text/markdown/extract-title-text.wasm modules/utf8/text-to-path-svg-dejavu-sans-mono-bold.wasm '?width=1200&height=630&font_size=72' modules/image/svg+xml/svg-rasterize.wasm '?background_color_rgba=0xeecc33ff'; \
 	done
 
 install:
