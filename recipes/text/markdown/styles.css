@@ -178,6 +178,7 @@ form {
   }
   input:not([type]),
   textarea {
+    max-width: 100%;
     width: 100%;
     padding: 0.5rlh 1em;
     background: color-mix(in srgb, var(--bg) 90%, white 10%);
