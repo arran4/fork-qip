@@ -1,4 +1,4 @@
-# Qip Docs
+# qip docs
 
 - [Module Contract](/docs/module-contract)
 - [Module Patterns](/docs/module-patterns)
