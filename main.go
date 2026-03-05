@@ -293,13 +293,13 @@ func readModulePath(path string, opts options) ([]byte, error) {
 	if strings.HasPrefix(path, "https://") {
 		resp, err := http.Get(path)
 		if err != nil {
-			return nil, fmt.Errorf("Error fetching URL: %v", err)
+			return nil, fmt.Errorf("error fetching URL: %w", err)
 		}
 		defer resp.Body.Close()
 
 		body, err = io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("Error reading response: %v", err)
+			return nil, fmt.Errorf("error reading response: %w", err)
 		}
 	} else {
 		var err error
@@ -4538,4 +4538,30 @@ func sumDurations(values []time.Duration) int64 {
 		total += v.Milliseconds()
 	}
 	return total
+}
+
+type closerContext interface {
+	Close(context.Context) error
+}
+
+func logCloseContext(ctx context.Context, c closerContext) {
+	if err := c.Close(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "error closing: %v\n", err)
+	}
+}
+
+func logClose(c io.Closer) {
+	if err := c.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "error closing: %v\n", err)
+	}
+}
+
+type flusher interface {
+	Flush() error
+}
+
+func logFlush(f flusher) {
+	if err := f.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "error flushing: %v\n", err)
+	}
 }
