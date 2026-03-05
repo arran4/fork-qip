@@ -209,16 +209,6 @@ type contentTypeWrapper interface {
 	unwrapContent() Content
 }
 
-type rawBytesWithContentType struct {
-	RawBytesContent
-	contentType string
-}
-
-func (c *rawBytesWithContentType) ContentType() string { return c.contentType }
-func (c *rawBytesWithContentType) unwrapContent() Content {
-	return c.RawBytesContent
-}
-
 type stringWithContentType struct {
 	StringContent
 	contentType string
@@ -312,8 +302,6 @@ func WithContentType(content Content, contentType string) Content {
 		return &stringWithContentType{StringContent: c, contentType: contentType}
 	case I32ArrayContent:
 		return &i32ArrayWithContentType{I32ArrayContent: c, contentType: contentType}
-	case RawBytesContent:
-		return &rawBytesWithContentType{RawBytesContent: c, contentType: contentType}
 	default:
 		return &contentWithContentType{Content: c, contentType: contentType}
 	}

@@ -909,10 +909,10 @@ func compileWasmModuleForTest(t *testing.T, ctx context.Context, runtime wazero.
 func TestContentTypeCheckingModesForRunModule(t *testing.T) {
 	ctx := context.Background()
 	runtime := wasmruntime.New(ctx)
-	defer runtime.Close(ctx)
+	defer runtime.Close(ctx) //nolint:errcheck
 
 	compiled := compileWasmModuleForTest(t, ctx, runtime, "examples/html-aria-extractor.wasm")
-	defer compiled.Close(ctx)
+	defer compiled.Close(ctx) //nolint:errcheck
 
 	input := []byte(`<a href="/x">X</a>`)
 	moduleName := "test-html-aria"
@@ -954,10 +954,10 @@ func TestContentTypeCheckingModesForRunModule(t *testing.T) {
 func TestTrustFirstStageContentTypePropagation(t *testing.T) {
 	ctx := context.Background()
 	runtime := wasmruntime.New(ctx)
-	defer runtime.Close(ctx)
+	defer runtime.Close(ctx) //nolint:errcheck
 
 	compiled := compileWasmModuleForTest(t, ctx, runtime, "examples/html-link-extractor.wasm")
-	defer compiled.Close(ctx)
+	defer compiled.Close(ctx) //nolint:errcheck
 
 	exec, err := executeModuleWithInput(
 		ctx,
