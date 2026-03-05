@@ -243,6 +243,21 @@ jobs:
           cache: true
       - run: CGO_ENABLED=1 go vet ./...
 
+  golangci:
+    name: lint
+    needs: [route, discover]
+    if: ${{ needs.discover.outputs.has_go == 'true' && needs.route.outputs.run_code_checks == 'true' && needs.discover.outputs.profile == 'public' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
   goreleaser:
     name: GoReleaser
     needs: [route, discover, go-lint-test, prepare-release-tag]
