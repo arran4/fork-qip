@@ -74,19 +74,25 @@ func RunFormCommand(args []string) error {
 
 	ctx := context.Background()
 	runtime := wasmruntime.New(ctx)
-	defer runtime.Close(ctx)
+	defer func() {
+		_ = runtime.Close(ctx)
+	}()
 
 	compiled, err := runtime.CompileModule(ctx, body)
 	if err != nil {
 		return errors.New("Wasm module could not be compiled")
 	}
-	defer compiled.Close(ctx)
+	defer func() {
+		_ = compiled.Close(ctx)
+	}()
 
 	mod, err := runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName("qip-form"))
 	if err != nil {
 		return errors.New("Wasm module could not be instantiated")
 	}
-	defer mod.Close(ctx)
+	defer func() {
+		_ = mod.Close(ctx)
+	}()
 
 	fm, err := resolveFormModule(mod)
 	if err != nil {

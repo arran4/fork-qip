@@ -216,7 +216,9 @@ func validateBaseContract(implWasm []byte) (baseValidationResult, error) {
 	if err != nil {
 		return baseValidationResult{}, errors.New("wasm module could not be instantiated")
 	}
-	defer mod.Close(ctx)
+	defer func() {
+		_ = mod.Close(ctx)
+	}()
 
 	if mod.ExportedMemory(complyExportMemory) == nil {
 		return baseValidationResult{}, errors.New("Wasm module must export memory")
@@ -567,14 +569,6 @@ func readFailureString(ctx context.Context, mod api.Module, mem api.Memory, base
 		return ""
 	}
 	return string(data)
-}
-
-func readFailureBytes(ctx context.Context, mod api.Module, mem api.Memory, bases []string) []byte {
-	data, ok := readFailureBytesMaybe(ctx, mod, mem, bases)
-	if !ok || len(data) == 0 {
-		return nil
-	}
-	return data
 }
 
 func readFailureBytesMaybe(ctx context.Context, mod api.Module, mem api.Memory, bases []string) ([]byte, bool) {

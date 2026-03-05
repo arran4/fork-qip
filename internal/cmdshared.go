@@ -1,6 +1,5 @@
 package qinternal
 
-
 import (
 	"context"
 	"fmt"
@@ -8,7 +7,6 @@ import (
 	"os"
 	"strings"
 )
-
 
 // NormalizeFlagArgs lets users place flags before or after positional args.
 // It preserves "--" so standard flag terminator semantics remain intact.

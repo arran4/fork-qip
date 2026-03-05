@@ -76,7 +76,9 @@ func (r *Router) Route(ctx context.Context, path, query string) (RouteResult, er
 	if err != nil {
 		return RouteResult{}, fmt.Errorf("%w: instantiate failed", ErrRouterInternal)
 	}
-	defer mod.Close(ctx)
+	defer func() {
+		_ = mod.Close(ctx)
+	}()
 
 	mem := mod.ExportedMemory(ExportMemory)
 	if mem == nil {

@@ -957,7 +957,6 @@ func parseModuleSpecs(args []string, commandName string) ([]moduleSpec, error) {
 	return specs, nil
 }
 
-
 func describeContentMismatch(expected, actual contentData) string {
 	if expected.encoding != actual.encoding {
 		return fmt.Sprintf("encoding differs (expected %s, actual %s)", encodingName(expected.encoding), encodingName(actual.encoding))
@@ -1026,14 +1025,14 @@ func loadTileStage(ctx context.Context, mod api.Module) (tileStage, error) {
 		return tileStage{}, wasmruntime.HumanizeExecutionError(ctx, err)
 	}
 	if !ok {
-		return tileStage{}, errors.New("Wasm module must export input_ptr as global or function")
+		return tileStage{}, errors.New("wasm module must export input_ptr as global or function")
 	}
 	inputCap, ok, err := getExportedValue(ctx, mod, "input_bytes_cap")
 	if err != nil {
 		return tileStage{}, wasmruntime.HumanizeExecutionError(ctx, err)
 	}
 	if !ok {
-		return tileStage{}, errors.New("Wasm module must export input_bytes_cap as global or function")
+		return tileStage{}, errors.New("wasm module must export input_bytes_cap as global or function")
 	}
 	return tileStage{
 		mod:         mod,
@@ -1830,7 +1829,6 @@ type moduleExecutionResult struct {
 	inputCapBytes     uint64
 	outputCapBytes    uint64
 }
-
 
 func executeModuleWithInput(
 	ctx context.Context,
@@ -4436,7 +4434,6 @@ func ensureRawContent(content qinternal.Content) (qinternal.Content, []byte, err
 	return bmp, data, nil
 }
 
-
 func isICOBytes(data []byte) bool {
 	if len(data) < 22 {
 		return false
@@ -4512,8 +4509,3 @@ func sumDurations(values []time.Duration) int64 {
 	}
 	return total
 }
-
-
-
-
-
