@@ -45,9 +45,14 @@ brews:
   - repository:
       owner: arran4
       name: homebrew-tap
+      branch: "{{.ProjectName}}-{{.Version}}"
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: true
+        draft: false
     commit_author:
-      name: github-actions[bot]
-      email: 41898282+github-actions[bot]@users.noreply.github.com
+      name: goreleaserbot
+      email: bot@goreleaser.com
     homepage: "https://github.com/royalicing/qip"
     description: "qip - Image Processing CLI"
     license: "MIT"
