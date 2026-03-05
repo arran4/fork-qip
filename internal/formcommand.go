@@ -105,12 +105,12 @@ func readFormModulePath(path string, verbose bool) ([]byte, error) {
 	if strings.HasPrefix(path, "https://") {
 		resp, err := http.Get(path)
 		if err != nil {
-			return nil, fmt.Errorf("error fetching URL: %v", err)
+			return nil, fmt.Errorf("error fetching URL: %w", err)
 		}
-		defer resp.Body.Close() //nolint:errcheck
+		defer LogClose(resp.Body)
 		body, err = io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("error reading response: %v", err)
+			return nil, fmt.Errorf("error reading response: %w", err)
 		}
 	} else {
 		var err error
@@ -209,7 +209,6 @@ func runFormInteractive(ctx context.Context, fm formModule, stdin io.Reader, std
 				if err != nil {
 					return err
 				}
-
 			}
 			outBytes, err := readOutputBytes(ctx, fm, lastOutputSize)
 			if err != nil {

@@ -118,6 +118,7 @@ const usageMain = "Usage: qip <command> [args]\n\nCommands:\n  run      Run a ch
 const usageRun = "Usage: qip run [-v] [-i <input>] [-o <output file or ->] [--timeout-ms <ms>] <wasm module URL or file> [?key=value[&key2=value2...] ...] ..."
 const usageBench = "Usage: qip bench -i <input> [-r <benchmark runs> | --benchtime=<duration>] [--timeout-ms <ms>] <module1> [module2 ...]"
 const usageImage = "Usage: qip image -i <input image path or -> -o <output image path> [--timeout-ms <ms>] [-v] <wasm module URL or file> [?key=value[&key2=value2...] ...] ..."
+const usageComply = "Usage: qip comply <impl.wasm> [--with <compliance.wasm> ...] [-v|--verbose] [--timeout-ms <ms>]"
 const usageDev = "Usage: qip dev <content_dir> [--recipes <recipes_dir>] [--forms <forms_dir>] [--modules <modules_dir>] [--mode <dev|prod>] [--view-source] [-p <port>] [-v|--verbose]"
 const usageRoute = "Usage: qip route <subcommand> [args]\n\nSubcommands:\n  get      Resolve one GET path through the dev router and print the result\n  head     Resolve one HEAD path through the dev router and print headers\n  list     List routed paths and content types\n  warc     Archive the routed site and write a minimal WARC file"
 const usageRouteGet = "Usage: qip route get <content_dir> <path> [--recipes <recipes_dir>] [--forms <forms_dir>] [--modules <modules_dir>] [--mode <dev|prod>] [-v|--verbose]"
@@ -292,13 +293,13 @@ func readModulePath(path string, opts options) ([]byte, error) {
 	if strings.HasPrefix(path, "https://") {
 		resp, err := http.Get(path)
 		if err != nil {
-			return nil, fmt.Errorf("error fetching URL: %v", err)
+			return nil, fmt.Errorf("error fetching URL: %w", err)
 		}
-		defer resp.Body.Close() //nolint:errcheck
+		defer resp.Body.Close()
 
 		body, err = io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("error reading response: %v", err)
+			return nil, fmt.Errorf("error reading response: %w", err)
 		}
 	} else {
 		var err error
@@ -393,7 +394,7 @@ func runCmd(args []string) {
 	if err != nil {
 		gameOver("%v", err)
 	}
-	defer pipeline.Close(context.Background()) //nolint:errcheck
+	defer pipeline.Close(context.Background())
 
 	execCtx := context.Background()
 	execCtx, cancel := wasmruntime.WithExecutionTimeout(execCtx, time.Duration(timeoutMS)*time.Millisecond)
@@ -521,7 +522,7 @@ func benchCmd(args []string) {
 
 	ctx := context.Background()
 	runtime := wasmruntime.New(ctx)
-	defer runtime.Close(ctx) //nolint:errcheck
+	defer runtime.Close(ctx)
 
 	moduleCount := len(modules)
 	compiled := make([]wazero.CompiledModule, moduleCount)
@@ -558,7 +559,7 @@ func benchCmd(args []string) {
 			gameOver("bench check failed for %s: Wasm module must export run(i32) -> i32 or tile_rgba_f32_64x64(f32, f32)", modules[i])
 		}
 		compiled[i] = cm
-		defer compiled[i].Close(ctx) //nolint:errcheck
+		defer compiled[i].Close(ctx)
 	}
 
 	perRunTimeout := time.Duration(timeoutMS) * time.Millisecond
@@ -956,7 +957,12 @@ func parseModuleSpecs(args []string, commandName string) ([]moduleSpec, error) {
 	return specs, nil
 }
 
-
+func formatCapacityBytes(size uint64) string {
+	if size == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%s (%d bytes)", formatBytesIEC(size), size)
+}
 
 func describeContentMismatch(expected, actual contentData) string {
 	if expected.encoding != actual.encoding {
@@ -1691,7 +1697,7 @@ func imageCmd(args []string) {
 	defer cancel()
 
 	r := wasmruntime.New(execCtx)
-	defer r.Close(baseCtx) //nolint:errcheck
+	defer r.Close(baseCtx)
 
 	stages := make([]tileStage, len(moduleBodies))
 	for i, body := range moduleBodies {
@@ -1831,7 +1837,13 @@ type moduleExecutionResult struct {
 	outputCapBytes    uint64
 }
 
-
+func runModuleWithInput(ctx context.Context, runtime wazero.Runtime, compiled wazero.CompiledModule, inputBytes []byte, opts options, moduleName string) (output contentData, instantiation time.Duration, returnErr error) {
+	exec, err := executeModuleWithInput(ctx, runtime, compiled, inputBytes, opts, moduleName, nil, "", opts.trustFirstStageContent)
+	if err != nil {
+		return contentData{}, 0, err
+	}
+	return exec.output, exec.instantiation, nil
+}
 
 func executeModuleWithInput(
 	ctx context.Context,
@@ -1855,7 +1867,7 @@ func executeModuleWithInput(
 		returnErr = errors.New("Wasm module could not be instantiated")
 		return
 	}
-	defer mod.Close(ctx) //nolint:errcheck
+	defer mod.Close(ctx)
 	exec.instantiation = time.Since(instStart)
 
 	if err := applyModuleUniforms(ctx, mod, uniforms); err != nil {
@@ -2265,9 +2277,7 @@ func devCmd(args []string) {
 	defer signal.Stop(hupCh)
 
 	var reloadWG sync.WaitGroup
-	reloadWG.Add(1)
-	go func() {
-		defer reloadWG.Done()
+	reloadWG.Go(func() {
 		for {
 			select {
 			case <-signalCtx.Done():
@@ -2276,7 +2286,7 @@ func devCmd(args []string) {
 				reloadRuntimeState("signal_hup")
 			}
 		}
-	}()
+	})
 	defer func() {
 		stop()
 		reloadWG.Wait()
@@ -2984,7 +2994,7 @@ func loadDevRuntimeState(ctx context.Context, contentRoot string, recipesRoot st
 		return nil, err
 	}
 	recipeSourceAssets := make([]qinternal.RecipeSourceAsset, 0)
-	var moduleSourceAssets []qinternal.RecipeSourceAsset
+	moduleSourceAssets := make([]qinternal.RecipeSourceAsset, 0)
 	recipeSourceByPath := make(map[string]qinternal.RecipeSourceAsset)
 	recipeSourceIndex := []byte(nil)
 	if opts.viewSource && recipesRoot != "" {
@@ -3440,7 +3450,7 @@ func loadFormModules(formsRoot string) (map[string][]byte, map[string][32]byte, 
 
 func closePipelines(ctx context.Context, pipelines map[string]*qinternal.Pipeline) {
 	for _, p := range pipelines {
-		_ = p.Close(ctx)
+		p.Close(ctx)
 	}
 }
 
@@ -3937,7 +3947,7 @@ func inspectRunModuleOutputContract(
 	if err != nil {
 		return "", false, 0, false, errors.New("Wasm module could not be instantiated")
 	}
-	defer mod.Close(ctx) //nolint:errcheck
+	defer mod.Close(ctx)
 
 	outputType, hasOutputType, err = readOptionalModuleContentType(ctx, mod, "output")
 	if err != nil {
@@ -4158,12 +4168,12 @@ func (d *wasmTileModuleDriver) init(ctx context.Context) error {
 
 	stage, err := loadTileStage(ctx, mod)
 	if err != nil {
-		_ = mod.Close(ctx)
+		mod.Close(ctx)
 		return fmt.Errorf("%s: %w", d.modulePath, err)
 	}
 
 	if err := applyModuleUniforms(ctx, mod, d.uniforms); err != nil {
-		_ = mod.Close(ctx)
+		mod.Close(ctx)
 		return fmt.Errorf("%s: %w", d.modulePath, err)
 	}
 
@@ -4174,7 +4184,7 @@ func (d *wasmTileModuleDriver) init(ctx context.Context) error {
 	if stage.haloFunc != nil {
 		values, err := stage.haloFunc.Call(ctx)
 		if err != nil {
-			_ = mod.Close(ctx)
+			mod.Close(ctx)
 			return fmt.Errorf("%s: %w", d.modulePath, wasmruntime.HumanizeExecutionError(ctx, err))
 		}
 		if len(values) > 0 {
@@ -4216,7 +4226,7 @@ func (d *wasmTileModuleDriver) ExecuteTile(ctx context.Context, x, y float32, ti
 
 func (d *wasmTileModuleDriver) Close(ctx context.Context) error {
 	if d.mod != nil {
-		_ = d.mod.Close(ctx)
+		d.mod.Close(ctx)
 	}
 	return d.compiled.Close(ctx)
 }
@@ -4286,7 +4296,7 @@ func writeRunOutputToStdout(result qinternal.Content, outputBytes []byte, opts o
 
 	if result.Encoding() == qinternal.EncodingI32Array {
 		if opts.verbose {
-			fmt.Fprintln(os.Stderr, string(outputBytes))
+			fmt.Fprintln(os.Stderr, outputBytes)
 		}
 
 		count := len(outputBytes) / 4
@@ -4296,7 +4306,7 @@ func writeRunOutputToStdout(result qinternal.Content, outputBytes []byte, opts o
 
 		bufSize := count * 9
 		writer := bufio.NewWriterSize(os.Stdout, bufSize)
-		defer writer.Flush() //nolint:errcheck
+		defer writer.Flush()
 
 		for i := 0; i < count; i++ {
 			v := binary.LittleEndian.Uint32(outputBytes[i*4:])
@@ -4439,7 +4449,20 @@ func ensureRawContent(content qinternal.Content) (qinternal.Content, []byte, err
 	return bmp, data, nil
 }
 
-
+func getBMPDimensions(data []byte) (int, int, error) {
+	if len(data) < 26 {
+		return 0, 0, errors.New("BMP data too short")
+	}
+	if data[0] != 'B' || data[1] != 'M' {
+		return 0, 0, errors.New("not a BMP file")
+	}
+	width := int(binary.LittleEndian.Uint32(data[18:22]))
+	height := int(int32(binary.LittleEndian.Uint32(data[22:26])))
+	if height < 0 {
+		height = -height
+	}
+	return width, height, nil
+}
 
 func isICOBytes(data []byte) bool {
 	if len(data) < 22 {
@@ -4484,7 +4507,7 @@ func writeDevError(w http.ResponseWriter, err error) {
 	ts := time.Now().Format(time.RFC3339)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusInternalServerError)
-	_, _ = fmt.Fprintf(w, "<!doctype html><meta charset=\"utf-8\"><title>qip dev error</title><pre>%s\n%s</pre>", ts, html.EscapeString(err.Error()))
+	fmt.Fprintf(w, "<!doctype html><meta charset=\"utf-8\"><title>qip dev error</title><pre>%s\n%s</pre>", ts, html.EscapeString(err.Error()))
 }
 
 func formatDurationParts(total time.Duration, moduleDurations []time.Duration, instantiationDurations []time.Duration) string {
@@ -4515,4 +4538,30 @@ func sumDurations(values []time.Duration) int64 {
 		total += v.Milliseconds()
 	}
 	return total
+}
+
+type closerContext interface {
+	Close(context.Context) error
+}
+
+func logCloseContext(ctx context.Context, c closerContext) {
+	if err := c.Close(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "error closing: %v\n", err)
+	}
+}
+
+func logClose(c io.Closer) {
+	if err := c.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "error closing: %v\n", err)
+	}
+}
+
+type flusher interface {
+	Flush() error
+}
+
+func logFlush(f flusher) {
+	if err := f.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "error flushing: %v\n", err)
+	}
 }

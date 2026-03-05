@@ -9,6 +9,8 @@ import (
 	"github.com/tetratelabs/wazero"
 )
 
+var ErrExecutionCanceled = errors.New("wasm module execution was canceled")
+
 // New returns a wazero runtime configured to terminate function execution when call context is canceled or times out.
 func New(ctx context.Context) wazero.Runtime {
 	runtimeConfig := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
@@ -38,7 +40,7 @@ func HumanizeExecutionError(ctx context.Context, err error) error {
 		return errors.New("Wasm module exceeded the execution time limit" + timeoutText + ", please increase --timeout-ms")
 	}
 	if errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled") {
-		return errors.New("wasm module execution was canceled")
+		return errors.New("Wasm module execution was canceled")
 	}
 	return err
 }

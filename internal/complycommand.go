@@ -185,12 +185,12 @@ func readComplyModulePath(path string) ([]byte, error) {
 	if strings.HasPrefix(path, "https://") {
 		resp, err := http.Get(path)
 		if err != nil {
-			return nil, fmt.Errorf("error fetching URL: %v", err)
+			return nil, fmt.Errorf("error fetching URL: %w", err)
 		}
-		defer resp.Body.Close() //nolint:errcheck
+		defer LogClose(resp.Body)
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("error reading response: %v", err)
+			return nil, fmt.Errorf("error reading response: %w", err)
 		}
 		return body, nil
 	}
@@ -204,13 +204,13 @@ func readComplyModulePath(path string) ([]byte, error) {
 func validateBaseContract(implWasm []byte) (baseValidationResult, error) {
 	ctx := context.Background()
 	r := wasmruntime.New(ctx)
-	defer r.Close(ctx) //nolint:errcheck
+	defer LogCloseContext(ctx, r)
 
 	compiled, err := r.CompileModule(ctx, implWasm)
 	if err != nil {
 		return baseValidationResult{}, errors.New("wasm module could not be compiled")
 	}
-	defer compiled.Close(ctx) //nolint:errcheck
+	defer LogCloseContext(ctx, compiled)
 
 	mod, err := r.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(implModuleName))
 	if err != nil {
@@ -322,21 +322,21 @@ func runComplianceModule(implWasm []byte, compliance complianceSpec, timeout tim
 
 	ctx := context.Background()
 	r := wasmruntime.New(ctx)
-	defer r.Close(ctx) //nolint:errcheck
+	defer LogCloseContext(ctx, r)
 
 	implCompiled, err := r.CompileModule(ctx, implWasm)
 	if err != nil {
 		out.err = errors.New("implementation module could not be compiled")
 		return out
 	}
-	defer implCompiled.Close(ctx) //nolint:errcheck
+	defer LogCloseContext(ctx, implCompiled)
 
 	complianceCompiled, err := r.CompileModule(ctx, compliance.wasm)
 	if err != nil {
 		out.err = errors.New("compliance module could not be compiled")
 		return out
 	}
-	defer complianceCompiled.Close(ctx) //nolint:errcheck
+	defer LogCloseContext(ctx, complianceCompiled)
 
 	if err := ensurecomplianceImportsImplMemory(complianceCompiled); err != nil {
 		out.err = err
@@ -431,7 +431,7 @@ func runCompliancePhase(
 	if err != nil {
 		return 0, "", errors.New("implementation module could not be instantiated")
 	}
-	defer implMod.Close(ctx) //nolint:errcheck
+	defer LogCloseContext(ctx, implMod)
 
 	var trapHostMod api.Module
 	if installTrapHost {
@@ -439,7 +439,7 @@ func runCompliancePhase(
 		if err != nil {
 			return 0, "", err
 		}
-		defer trapHostMod.Close(ctx) //nolint:errcheck
+		defer LogCloseContext(ctx, trapHostMod)
 	}
 
 	complianceMod, err := r.InstantiateModule(ctx, complianceCompiled, wazero.NewModuleConfig().WithName("compliance-"+entrypoint))
@@ -449,7 +449,7 @@ func runCompliancePhase(
 		}
 		return 0, "", fmt.Errorf("compliance module could not be instantiated (imports must bind to %q): %w", implModuleName, err)
 	}
-	defer complianceMod.Close(ctx) //nolint:errcheck
+	defer LogCloseContext(ctx, complianceMod)
 
 	fn := complianceMod.ExportedFunction(entrypoint)
 	if fn == nil {
@@ -569,7 +569,13 @@ func readFailureString(ctx context.Context, mod api.Module, mem api.Memory, base
 	return string(data)
 }
 
-
+func readFailureBytes(ctx context.Context, mod api.Module, mem api.Memory, bases []string) []byte {
+	data, ok := readFailureBytesMaybe(ctx, mod, mem, bases)
+	if !ok || len(data) == 0 {
+		return nil
+	}
+	return data
+}
 
 func readFailureBytesMaybe(ctx context.Context, mod api.Module, mem api.Memory, bases []string) ([]byte, bool) {
 	for _, base := range bases {
