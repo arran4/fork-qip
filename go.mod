@@ -2,7 +2,7 @@ module github.com/royalicing/qip
 
 go 1.25.5
 
-toolchain go1.24.3
+toolchain go1.25.5
 
 require github.com/tetratelabs/wazero v1.11.0
 
