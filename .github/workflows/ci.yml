@@ -89,7 +89,6 @@ jobs:
               fi
               ;;
             release)
-              run_release=true
               run_code_checks=true
               ;;
             workflow_dispatch)
