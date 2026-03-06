@@ -248,6 +248,19 @@ jobs:
           cache: true
       - run: CGO_ENABLED=1 go vet ./...
 
+  dart-format:
+    name: Dart format
+    needs: [route, discover]
+    if: ${{ needs.discover.outputs.has_dart == 'true' && needs.route.outputs.run_code_checks == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - name: Format
+        run: |
+          dart format .
+          git diff --exit-code
+
   autofix:
     name: Auto-format and open PR
     needs: [route, discover]
@@ -262,6 +275,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Setup Dart (if needed)
+        if: ${{ needs.discover.outputs.has_dart == 'true' }}
+        uses: dart-lang/setup-dart@v1
+
       - name: Run autofix formatters
         shell: bash
         run: |
@@ -270,6 +287,10 @@ jobs:
             go fix ./... || true
             go fmt ./... || true
           fi
+          if [[ "${{ needs.discover.outputs.has_dart }}" == "true" ]]; then
+            dart format . || true
+          fi
+
 
       - name: Create PR if changes exist
         env:
