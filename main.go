@@ -1071,13 +1071,13 @@ func runTileStages(ctx context.Context, stages []tileStage, inputRGBA *image.RGB
 				api.EncodeF32(float32(width)),
 				api.EncodeF32(float32(height)),
 			); err != nil {
-				return nil, nil, fmt.Errorf("Error running uniform_set_width_and_height: %v", err)
+				return nil, nil, fmt.Errorf("error running uniform_set_width_and_height: %v", err)
 			}
 		}
 		if stage.haloFunc != nil {
 			values, err := stage.haloFunc.Call(ctx)
 			if err != nil {
-				return nil, nil, fmt.Errorf("Error running calculate_halo_px: %v", err)
+				return nil, nil, fmt.Errorf("error running calculate_halo_px: %v", err)
 			}
 			if len(values) > 0 {
 				stage.haloPx = int(int32(values[0]))
@@ -1089,7 +1089,7 @@ func runTileStages(ctx context.Context, stages []tileStage, inputRGBA *image.RGB
 		stage.tileSpan = tileSize + stage.haloPx*2
 		tileF32Size := uint64(stage.tileSpan) * uint64(stage.tileSpan) * 4 * 4
 		if tileF32Size > stage.inputCap {
-			return nil, nil, errors.New("Tile buffer exceeds module input_bytes_cap")
+			return nil, nil, errors.New("tile buffer exceeds module input_bytes_cap")
 		}
 	}
 
@@ -1852,7 +1852,7 @@ func executeModuleWithInput(
 		returnErr = errors.New("Wasm module could not be instantiated")
 		return
 	}
-	defer mod.Close(ctx)
+	defer func() { _ = mod.Close(ctx) }()
 	exec.instantiation = time.Since(instStart)
 
 	if err := applyModuleUniforms(ctx, mod, uniforms); err != nil {
@@ -3932,7 +3932,7 @@ func inspectRunModuleOutputContract(
 	if err != nil {
 		return "", false, 0, false, errors.New("Wasm module could not be instantiated")
 	}
-	defer mod.Close(ctx)
+	defer func() { _ = mod.Close(ctx) }()
 
 	outputType, hasOutputType, err = readOptionalModuleContentType(ctx, mod, "output")
 	if err != nil {
@@ -4153,7 +4153,7 @@ func (d *wasmTileModuleDriver) init(ctx context.Context) error {
 
 	stage, err := loadTileStage(ctx, mod)
 	if err != nil {
-		mod.Close(ctx)
+		_ = mod.Close(ctx)
 		return fmt.Errorf("%s: %w", d.modulePath, err)
 	}
 
