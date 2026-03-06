@@ -95,7 +95,7 @@ func RunComplyCommand(args []string) error {
 
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return errors.New(usageComply)
+		return errors.New("usage: " + usageComply)
 	}
 	if timeoutMS < minComplianceTimeoutMS {
 		return fmt.Errorf("%s invalid timeout-ms: %d", usageComply, timeoutMS)
@@ -196,7 +196,7 @@ func readComplyModulePath(path string) ([]byte, error) {
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("Error reading file: %v", err)
+		return nil, fmt.Errorf("error reading file: %v", err)
 	}
 	return body, nil
 }
@@ -221,7 +221,7 @@ func validateBaseContract(implWasm []byte) (baseValidationResult, error) {
 	}()
 
 	if mod.ExportedMemory(complyExportMemory) == nil {
-		return baseValidationResult{}, errors.New("Wasm module must export memory")
+		return baseValidationResult{}, errors.New("wasm module must export memory")
 	}
 
 	funcs := compiled.ExportedFunctions()
@@ -233,7 +233,7 @@ func validateBaseContract(implWasm []byte) (baseValidationResult, error) {
 		if _, ok, err := getExportedI32(ctx, mod, complyExportInputPtr); err != nil {
 			return baseValidationResult{}, err
 		} else if !ok {
-			return baseValidationResult{}, errors.New("Wasm run module must export input_ptr as global or function")
+			return baseValidationResult{}, errors.New("wasm run module must export input_ptr as global or function")
 		}
 		if _, ok, err := getExportedI32(ctx, mod, complyExportInputUTF8Cap); err != nil {
 			return baseValidationResult{}, err
@@ -244,7 +244,7 @@ func validateBaseContract(implWasm []byte) (baseValidationResult, error) {
 		} else if ok {
 			hasRun = true
 		} else {
-			return baseValidationResult{}, errors.New("Wasm run module must export input_utf8_cap or input_bytes_cap as global or function")
+			return baseValidationResult{}, errors.New("wasm run module must export input_utf8_cap or input_bytes_cap as global or function")
 		}
 	}
 
@@ -256,12 +256,12 @@ func validateBaseContract(implWasm []byte) (baseValidationResult, error) {
 		if _, ok, err := getExportedI32(ctx, mod, complyExportInputPtr); err != nil {
 			return baseValidationResult{}, err
 		} else if !ok {
-			return baseValidationResult{}, errors.New("Wasm tile module must export input_ptr as global or function")
+			return baseValidationResult{}, errors.New("wasm tile module must export input_ptr as global or function")
 		}
 		if _, ok, err := getExportedI32(ctx, mod, complyExportInputBytesCap); err != nil {
 			return baseValidationResult{}, err
 		} else if !ok {
-			return baseValidationResult{}, errors.New("Wasm tile module must export input_bytes_cap as global or function")
+			return baseValidationResult{}, errors.New("wasm tile module must export input_bytes_cap as global or function")
 		}
 		hasTile = true
 	}
@@ -274,13 +274,13 @@ func validateBaseContract(implWasm []byte) (baseValidationResult, error) {
 	case hasTile:
 		return baseValidationResult{kind: moduleKindTile}, nil
 	default:
-		return baseValidationResult{}, errors.New("Wasm module is neither a run module nor a tile module")
+		return baseValidationResult{}, errors.New("wasm module is neither a run module nor a tile module")
 	}
 }
 
 func requireSignature(def api.FunctionDefinition, wantParams []api.ValueType, wantResults []api.ValueType, name string) error {
 	if !sameTypes(def.ParamTypes(), wantParams) || !sameTypes(def.ResultTypes(), wantResults) {
-		return fmt.Errorf("Wasm module export %s has invalid signature", name)
+		return fmt.Errorf("wasm module export %s has invalid signature", name)
 	}
 	return nil
 }
