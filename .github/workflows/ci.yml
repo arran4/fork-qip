@@ -210,8 +210,8 @@ jobs:
             echo "profile=public" >> "$GITHUB_OUTPUT"
           fi
 
-  go-lint-test:
-    name: Go lint/test (${{ matrix.os }})
+  go-test:
+    name: Go test (${{ matrix.os }})
     needs: [route, discover]
     if: ${{ needs.discover.outputs.has_go == 'true' && needs.route.outputs.run_code_checks == 'true' }}
     runs-on: ${{ matrix.os }}
@@ -227,11 +227,6 @@ jobs:
           cache: true
       - name: Install WABT
         run: sudo apt-get update && sudo apt-get install -y wabt
-      - name: Format and Fix
-        run: |
-          go fmt ./...
-          go fix ./...
-          git diff --exit-code
       - name: Test
         run: CGO_ENABLED=1 go test ./... -v
 
@@ -248,10 +243,10 @@ jobs:
           cache: true
       - run: CGO_ENABLED=1 go vet ./...
 
-  autofix:
-    name: Auto-format and open PR
+  format:
+    name: Format
     needs: [route, discover]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'lint-fix' }}
+    if: ${{ needs.discover.outputs.has_go == 'true' && needs.route.outputs.run_code_checks == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -282,23 +277,29 @@ jobs:
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.mode }}" == "lint-fix" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          PARENT_PR="${{ github.event.pull_request.number || 'none' }}"
-          BRANCH="ci/autofix/${{ github.run_id }}-parent-${PARENT_PR}"
+            PARENT_PR="${{ github.event.pull_request.number || 'none' }}"
+            BRANCH="ci/autofix/${{ github.run_id }}-parent-${PARENT_PR}"
 
-          git checkout -b "$BRANCH"
-          git add -A
-          git commit -m "ci: automated formatting fixes"
-          git push origin "$BRANCH"
+            git checkout -b "$BRANCH"
+            git add -A
+            git commit -m "ci: automated formatting fixes"
+            git push origin "$BRANCH"
 
-          gh pr create \
-            --title "ci: automated formatting fixes" \
-            --body "Automated formatting pass. Parent-PR: ${PARENT_PR}" \
-            --base main \
-            --head "$BRANCH" \
-            --label "ci-autofix"
+            gh pr create \
+              --title "ci: automated formatting fixes" \
+              --body "Automated formatting pass. Parent-PR: ${PARENT_PR}" \
+              --base main \
+              --head "$BRANCH" \
+              --label "ci-autofix"
+          else
+            echo "Formatting changes required. Please run 'go fmt ./...' and 'go fix ./...'."
+            git diff
+            exit 1
+          fi
 
   cleanup-autofix-prs:
     name: Cleanup autofix PRs on parent close
@@ -318,8 +319,8 @@ jobs:
               gh pr close "$pr" --comment "Closing auto-fix PR because parent PR #$PARENT_PR was closed."
               git push origin --delete "$branch" || true
             done
-  golangci:
-    name: lint
+  go-lint:
+    name: Go lint
     needs: [route, discover]
     if: ${{ needs.discover.outputs.has_go == 'true' && needs.route.outputs.run_code_checks == 'true' }}
     runs-on: ubuntu-latest
@@ -335,7 +336,7 @@ jobs:
 
   goreleaser:
     name: GoReleaser
-    needs: [route, discover, go-lint-test, prepare-release-tag]
+    needs: [route, discover, go-test, go-lint, format, prepare-release-tag]
     if: ${{ !failure() && !cancelled() && needs.discover.outputs.has_go == 'true' && needs.discover.outputs.has_goreleaser == 'true' && needs.route.outputs.run_release == 'true' }}
     runs-on: ubuntu-latest
     steps:
