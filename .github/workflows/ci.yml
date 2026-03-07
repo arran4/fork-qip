@@ -230,6 +230,43 @@ jobs:
       - name: Test
         run: CGO_ENABLED=1 go test ./... -v
 
+  zig-test:
+    name: Zig test
+    needs: [route, discover, go-test]
+    if: ${{ needs.discover.outputs.has_go == 'true' && needs.route.outputs.run_code_checks == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig
+        run: |
+          wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+          tar xf zig-linux-x86_64-0.13.0.tar.xz
+          sudo mv zig-linux-x86_64-0.13.0 /opt/zig
+          sudo ln -s /opt/zig/zig /usr/local/bin/zig
+      - name: Test
+        run: make test-zig
+
+  snapshot-test:
+    name: Snapshot test
+    needs: [route, discover, go-test]
+    if: ${{ needs.discover.outputs.has_go == 'true' && needs.route.outputs.run_code_checks == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y wabt xxd
+          wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+          tar xf zig-linux-x86_64-0.13.0.tar.xz
+          sudo mv zig-linux-x86_64-0.13.0 /opt/zig
+          sudo ln -s /opt/zig/zig /usr/local/bin/zig
+      - name: Test
+        run: make test-snapshot
+
   go-vet:
     name: Go vet
     needs: [route, discover]
